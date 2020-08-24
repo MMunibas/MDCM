@@ -57,7 +57,7 @@ Options:
 * -v: verbose output
 
 **Combining fragment models to build molecular models**
-`5-combine.sh`
+`combine.sh`
 Options are set inside the script by defining the shell variables:
 * WORKDIR: the root folder of the working directory
 * BINDIR: the folder containing the (p)cubefit.x binaries
