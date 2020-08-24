@@ -27,11 +27,11 @@ Options:
 * -qtot:  total molecular charge
 
 ### (p)cubefit.x
-Atomic charge fitting:
+**Atomic charge fitting:**
 `pcubefit.x -greedy $FITTED-MTPL -esp $PCUBE -dens $DCUBE -nacmin $MINCHG -nacmax $MAXCHG -atom $ATOMINDEX -ntry $NTRY -onlymultipoles -v > $OUTFILE`
 
 Options:
-* -greedy:  use "greedy" fitting algorithm in differential evolution fitting (recommended)
+* -greedy:  use "greedy" fitting algorithm in differential evolution fitting (recommended), and define $MTPFILE containing fitted atomic multipoles
 * -esp: define Gaussian cube file "$PCUBE" containing the molecular electrostatic potential
 * -dens: define Gaussian cube file "$DCUBE" containing the molecular electron density
 * -nacmin: define lowest number of charges to fit per atom (usually 1)
@@ -39,3 +39,29 @@ Options:
 * -atom: define index of atom to be fitted (corresponds to ordering in cube files). Fitting atoms separately allows efficient parallelization of the fitting process.
 * -ntry: set number of complete fitting runs. As the fitting code involves making random "mutations" to existing populations of candidate solutions, better results may be obtained by repeating the fitting process a few times and selecting the best result
 * -onlymultipoles: state that we want to fit multipole moments only in this step and not atomic charges
+* -v: verbose output
+
+**Fragment charge fitting:**
+`pcubefit.x -greedy $MTPFILE -esp $PCUBE -dens $DCUBE -ncmin $MINCHG -ncmax $MAXCHG -atom $ATOMLIST -nacmax $MAXCHG -ntry $NTRY -v > $OUTFILE`
+
+Options:
+* -greedy:  use "greedy" fitting algorithm in differential evolution fitting (recommended), and define $MTPFILE containing fitted atomic multipoles
+* -esp: define Gaussian cube file "$PCUBE" containing the molecular electrostatic potential
+* -dens: define Gaussian cube file "$DCUBE" containing the molecular electron density
+* -nacmax: the highest number of charges per atom used during atom fitting in the previous step
+* -ncmin: define lowest number of charges to fit for this fragment
+* -ncmax: define highest number of charges to fit for this fragment
+* -atom: define a comma-separated list of atom indices to be fitted without spaces (indices correspond to atom ordering in cube files). Fitting fragments allows efficient fitting of models with too many charges to fit efficiently all at once
+* -ntry: set number of complete fitting runs. As the fitting code involves making random "mutations" to existing populations of candidate solutions, better results may be obtained by repeating the fitting process a few times and selecting the best result
+* -v: verbose output
+
+**Molecular MDCM refinement**
+`pcubefit.x -xyz $INITIALXYZ $MTPFILE -esp $PCUBE -dens $DCUBE -nacmax $MAXATMCHG -ntry $NTRY -v > $OUTFILE`
+
+Options:
+* -xyz: defines the file containing the molecular charge model to be refined (usually the charge model created by combining fitted fragment models), and the file containing the fitted atomic multipoles
+* -esp: define Gaussian cube file "$PCUBE" containing the molecular electrostatic potential
+* -dens: define Gaussian cube file "$DCUBE" containing the molecular electron density
+* -nacmax: the highest number of charges per atom used during atom fitting in the atomic charge fitting step
+* -ntry: set number of complete fitting runs. As the fitting code involves making random "mutations" to existing populations of candidate solutions, better results may be obtained by repeating the fitting process a few times and selecting the best result
+* -v: verbose output
