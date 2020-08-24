@@ -3,8 +3,8 @@
 # Script to find the best combination of fragment results that combine to a given number
 # of molecule charges
 
-WORKDIR=/home/devereux/naphta04/mdcm_fit
-BINDIR=/home/devereux/mdcm-fitting-code/mdcm-code
+WORKDIR=/home/xxx/mdcm_fit
+BINDIR=/home/xxx/mdcm-code
 FRAGDIR=$WORKDIR/frag-fit
 NFRAG=3             #number of fragments fitted
 NFIT=2             #number of fits per fragment
