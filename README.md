@@ -56,7 +56,7 @@ Options:
 * -ntry: set number of complete fitting runs. As the fitting code involves making random "mutations" to existing populations of candidate solutions, better results may be obtained by repeating the fitting process a few times and selecting the best result
 * -v: verbose output
 
-**Combine fragment models to build molecular models**
+**Combining fragment models to build molecular models**
 `5-combine.sh`
 Options are set inside the script by defining the shell variables:
 * WORKDIR: the root folder of the working directory
