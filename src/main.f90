@@ -915,7 +915,8 @@ logical function feasible(q)
     
         !find atom with minimal relative distance to atom included in fit
         rmin = huge(0._rp) 
-        do a = 1,Natom
+        do b=1, natmfit
+            a=fitatoms(b)
             r = sqrt(sum((atom_pos(:,a)-q(i:i+2))**2))/(vdW_scaling*vdW_radius(atom_num(a)))
             !print*, atom_num(a), vdW_radius(atom_num(a))*bohr2angstrom
             if(r < rmin) rmin = r
