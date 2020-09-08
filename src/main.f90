@@ -14,64 +14,62 @@ real(rp), parameter :: angstrom2bohr      = 1._rp/bohr2angstrom
 real(rp), parameter :: hartree2kcal       = 627.509_rp
 !https://de.wikipedia.org/wiki/Van-der-Waals-Radius
 real(rp), parameter :: vdW_scaling = 1.0_rp/3.0_rp ! r must be smaller than scaling*vdW_radius to be feasible
-real(rp), parameter :: reduce_vdW = 0.9_rp ! this will be used to decrease size
-! of the atoms so that we sample closer to the nuclei to improve close-range ESP
 real(rp), dimension(55), parameter :: vdW_radius = (/ &
-                                     1.20_rp*angstrom2bohr*reduce_vdW, & ! H
-                                     1.40_rp*angstrom2bohr*reduce_vdW, & ! He
-                                     1.82_rp*angstrom2bohr*reduce_vdW, & ! Li
-                                     1.53_rp*angstrom2bohr*reduce_vdW, & ! Be
-                                     1.92_rp*angstrom2bohr*reduce_vdW, & ! B
-                                     1.70_rp*angstrom2bohr*reduce_vdW, & ! C
-                                     1.55_rp*angstrom2bohr*reduce_vdW, & ! N
-                                     1.52_rp*angstrom2bohr*reduce_vdW, & ! O
-                                     1.47_rp*angstrom2bohr*reduce_vdW, & ! F
-                                     1.54_rp*angstrom2bohr*reduce_vdW, & ! Ne
-                                     2.27_rp*angstrom2bohr*reduce_vdW, & ! Na
-                                     1.73_rp*angstrom2bohr*reduce_vdW, & ! Mg
-                                     1.84_rp*angstrom2bohr*reduce_vdW, & ! Al
-                                     2.10_rp*angstrom2bohr*reduce_vdW, & ! Si
-                                     1.80_rp*angstrom2bohr*reduce_vdW, & ! P
-                                     1.80_rp*angstrom2bohr*reduce_vdW, & ! S
-                                     1.75_rp*angstrom2bohr*reduce_vdW, & ! Cl
-                                     1.88_rp*angstrom2bohr*reduce_vdW, & ! Ar
-                                     2.75_rp*angstrom2bohr*reduce_vdW, & ! K
-                                     2.31_rp*angstrom2bohr*reduce_vdW, & ! Ca
-                                     0.00_rp*angstrom2bohr*reduce_vdW, & ! Sc
-                                     0.00_rp*angstrom2bohr*reduce_vdW, & ! Ti
-                                     0.00_rp*angstrom2bohr*reduce_vdW, & ! V
-                                     0.00_rp*angstrom2bohr*reduce_vdW, & ! Cr
-                                     0.00_rp*angstrom2bohr*reduce_vdW, & ! Mn
-                                     0.00_rp*angstrom2bohr*reduce_vdW, & ! Fe
-                                     0.00_rp*angstrom2bohr*reduce_vdW, & ! Co
-                                     1.63_rp*angstrom2bohr*reduce_vdW, & ! Ni
-                                     1.40_rp*angstrom2bohr*reduce_vdW, & ! Cu
-                                     1.39_rp*angstrom2bohr*reduce_vdW, & ! Zn
-                                     1.87_rp*angstrom2bohr*reduce_vdW, & ! Ga
-                                     2.11_rp*angstrom2bohr*reduce_vdW, & ! Ge
-                                     1.85_rp*angstrom2bohr*reduce_vdW, & ! As
-                                     1.90_rp*angstrom2bohr*reduce_vdW, & ! Se
-                                     1.85_rp*angstrom2bohr*reduce_vdW, & ! Br
-                                     2.02_rp*angstrom2bohr*reduce_vdW, & ! Kr
-                                     3.03_rp*angstrom2bohr*reduce_vdW, & ! Rb
-                                     2.49_rp*angstrom2bohr*reduce_vdW, & ! Sr
-                                     0.00_rp*angstrom2bohr*reduce_vdW, & ! Y
-                                     0.00_rp*angstrom2bohr*reduce_vdW, & ! Zr
-                                     0.00_rp*angstrom2bohr*reduce_vdW, & ! Nb
-                                     0.00_rp*angstrom2bohr*reduce_vdW, & ! Mo
-                                     0.00_rp*angstrom2bohr*reduce_vdW, & ! Tc
-                                     0.00_rp*angstrom2bohr*reduce_vdW, & ! Ru
-                                     0.00_rp*angstrom2bohr*reduce_vdW, & ! Rh
-                                     1.63_rp*angstrom2bohr*reduce_vdW, & ! Pd
-                                     1.72_rp*angstrom2bohr*reduce_vdW, & ! Ag
-                                     1.58_rp*angstrom2bohr*reduce_vdW, & ! Cd
-                                     1.93_rp*angstrom2bohr*reduce_vdW, & ! In
-                                     2.17_rp*angstrom2bohr*reduce_vdW, & ! Sn
-                                     2.06_rp*angstrom2bohr*reduce_vdW, & ! Sb
-                                     2.06_rp*angstrom2bohr*reduce_vdW, & ! Te
-                                     1.98_rp*angstrom2bohr*reduce_vdW, & ! I
-                                     2.16_rp*angstrom2bohr*reduce_vdW, & ! Xe
-                                     0.00_rp*angstrom2bohr*reduce_vdW  &
+                                     1.20_rp*angstrom2bohr, & ! H
+                                     1.40_rp*angstrom2bohr, & ! He
+                                     1.82_rp*angstrom2bohr, & ! Li
+                                     1.53_rp*angstrom2bohr, & ! Be
+                                     1.92_rp*angstrom2bohr, & ! B
+                                     1.70_rp*angstrom2bohr, & ! C
+                                     1.55_rp*angstrom2bohr, & ! N
+                                     1.52_rp*angstrom2bohr, & ! O
+                                     1.47_rp*angstrom2bohr, & ! F
+                                     1.54_rp*angstrom2bohr, & ! Ne
+                                     2.27_rp*angstrom2bohr, & ! Na
+                                     1.73_rp*angstrom2bohr, & ! Mg
+                                     1.84_rp*angstrom2bohr, & ! Al
+                                     2.10_rp*angstrom2bohr, & ! Si
+                                     1.80_rp*angstrom2bohr, & ! P
+                                     1.80_rp*angstrom2bohr, & ! S
+                                     1.75_rp*angstrom2bohr, & ! Cl
+                                     1.88_rp*angstrom2bohr, & ! Ar
+                                     2.75_rp*angstrom2bohr, & ! K
+                                     2.31_rp*angstrom2bohr, & ! Ca
+                                     0.00_rp*angstrom2bohr, & ! Sc
+                                     0.00_rp*angstrom2bohr, & ! Ti
+                                     0.00_rp*angstrom2bohr, & ! V
+                                     0.00_rp*angstrom2bohr, & ! Cr
+                                     0.00_rp*angstrom2bohr, & ! Mn
+                                     0.00_rp*angstrom2bohr, & ! Fe
+                                     0.00_rp*angstrom2bohr, & ! Co
+                                     1.63_rp*angstrom2bohr, & ! Ni
+                                     1.40_rp*angstrom2bohr, & ! Cu
+                                     1.39_rp*angstrom2bohr, & ! Zn
+                                     1.87_rp*angstrom2bohr, & ! Ga
+                                     2.11_rp*angstrom2bohr, & ! Ge
+                                     1.85_rp*angstrom2bohr, & ! As
+                                     1.90_rp*angstrom2bohr, & ! Se
+                                     1.85_rp*angstrom2bohr, & ! Br
+                                     2.02_rp*angstrom2bohr, & ! Kr
+                                     3.03_rp*angstrom2bohr, & ! Rb
+                                     2.49_rp*angstrom2bohr, & ! Sr
+                                     0.00_rp*angstrom2bohr, & ! Y
+                                     0.00_rp*angstrom2bohr, & ! Zr
+                                     0.00_rp*angstrom2bohr, & ! Nb
+                                     0.00_rp*angstrom2bohr, & ! Mo
+                                     0.00_rp*angstrom2bohr, & ! Tc
+                                     0.00_rp*angstrom2bohr, & ! Ru
+                                     0.00_rp*angstrom2bohr, & ! Rh
+                                     1.63_rp*angstrom2bohr, & ! Pd
+                                     1.72_rp*angstrom2bohr, & ! Ag
+                                     1.58_rp*angstrom2bohr, & ! Cd
+                                     1.93_rp*angstrom2bohr, & ! In
+                                     2.17_rp*angstrom2bohr, & ! Sn
+                                     2.06_rp*angstrom2bohr, & ! Sb
+                                     2.06_rp*angstrom2bohr, & ! Te
+                                     1.98_rp*angstrom2bohr, & ! I
+                                     2.16_rp*angstrom2bohr, & ! Xe
+                                     0.00_rp*angstrom2bohr  &
                                      /)
 
 ! program parameters
@@ -94,7 +92,7 @@ integer  :: num_charges_max_multipole = 5
 integer  :: num_trials        = 1       ! maximum number of trials per number of charges
 real(rp) :: total_charge      = 0._rp   ! total charge
 real(rp) :: total_charge2     = 0._rp   ! total charge
-real(rp) :: max_charge        = 10._rp  ! maximum allowed absolute value of a charge (in search range)
+real(rp) :: max_charge        = 1._rp  ! maximum allowed absolute value of a charge (in search range)
 real(rp) :: max_extend        = 5._rp   ! gets calculated automatically from vdW radii
 
 character(len=1024) :: input_esp_cubefile = '', &
@@ -112,10 +110,10 @@ logical :: generate_mode = .false. ! for generating esp cube file from charges (
 
 
 !how to "prune" grid points
-logical  :: use_vdW_grid_cutoff = .false.
-real(rp) :: vdw_grid_min_cutoff = 1.66_rp      !radius smaller than this*vdw_radius gets ignored
+logical  :: use_vdW_grid_cutoff = .true.
+real(rp) :: vdw_grid_min_cutoff = 1.20_rp      !radius smaller than this*vdw_radius gets ignored
 real(rp) :: vdw_grid_max_cutoff = 2.20_rp      !radius larger than this*vdw_radius gets ignored
-logical  :: use_density_grid_cutoff = .true.
+logical  :: use_density_grid_cutoff = .false.
 real(rp) :: density_grid_min_cutoff = 3.162277660e-4_rp !density smaller than this is ignored
 real(rp) :: density_grid_max_cutoff = 2.0e-3 ! 1.0e-3_rp !density larger than this is ignored
 
@@ -197,7 +195,7 @@ if(analysis_mode) then
     
     !read in the second esp file
     call read_cube_file(trim(compare_esp_cubefile),trim(input_density_cubefile))
-    call do_analysis() !calculate all the errors in different regions
+    call do_analysis(vdw_grid_min_cutoff,vdw_grid_max_cutoff) !calculate all the errors in different regions
     call write_error_cube_file() !writes the difference between true and fittes esp file to a cube file !works, but currently not wanted
     
     ! plot with R
@@ -599,8 +597,8 @@ if(use_greedy_fit) then
     if(greedy_only_multi) stop 
 end if
 
-!Modify reference MEP grid by subtracting multipolar ESP from atoms that are
-!excluded from fit
+!Change reference MEP to the multipolar MEP if we're fitting a fragment rather
+!than the whole molecule
 
 !allocate memory for the multipole information and read it
 if(.not.allocated(multipole))                 allocate(multipole((lmax+1)**2*Natom))
@@ -614,15 +612,35 @@ if(.not.allocated(multipole_best))            allocate( &
 !read in multipole data
 call read_multipole_file(input_multipolefile)
 
-!subtract ESP at each grid point due to multipoles of atoms excluded from fit
-outer: do a=1,Natom
-  do b=1, natmfit  !skip atoms in fragment to be fitted
-    i=fitatoms(b)
-    if(i == a) cycle outer
-  enddo
-  call subtract_atom_multipole_ESP_from_grid(multipole,a)
-enddo outer
+!!subtract ESP at each grid point due to multipoles of atoms excluded from fit
+!outer: do a=1,Natom
+!  do b=1, natmfit  !skip atoms in fragment to be fitted
+!    i=fitatoms(b)
+!    if(i == a) cycle outer
+!  enddo
+!  call subtract_atom_multipole_ESP_from_grid(multipole,a)
+!enddo outer
 
+!if atoms are excluded from the fit then fit to multipolar ESP of remaining
+!atoms
+
+if(natmfit < Natom) then ! some atoms are excluded
+  write(*,'(A)') 'Fragment fit detected'
+  write(*,'(A)') 'Fitting to MTP grid, discarding reference MEP cube data'
+  write(*,'(A)') 'Subsequent stats etc. are compared to MTP data, not the'
+  write(*,'(A)') 'MEP from the reference cube file'
+  ! first zero reference grid
+  do i = 1,Ngrid
+     esp_grid(i) = 0.d0
+  end do
+  ! now repopulate with multipolar ESP
+  outer: do a=1,Natom
+    do b=1, natmfit  !skip atoms in fragment to be fitted
+      i=fitatoms(b)
+      if(i == a) call add_atom_multipole_ESP_to_grid(multipole,a)
+    enddo
+  enddo outer
+endif
 
 !refining the solution
 if(refine_solution) then
@@ -872,7 +890,7 @@ end function sum_constr_multipole
 logical function feasible(q)
     implicit none
     real(rp), dimension(:) :: q
-    real(rp), parameter :: max_charge_magnitude = 5._rp
+    real(rp), parameter :: max_charge_magnitude = 1._rp
     real(rp) :: qtot
     real(rp) :: r, rmin ! shortest distance to atom
     integer  :: i, a, b
@@ -897,8 +915,7 @@ logical function feasible(q)
     
         !find atom with minimal relative distance to atom included in fit
         rmin = huge(0._rp) 
-        do b = 1,natmfit
-            a = fitatoms(b)
+        do a = 1,Natom
             r = sqrt(sum((atom_pos(:,a)-q(i:i+2))**2))/(vdW_scaling*vdW_radius(atom_num(a)))
             !print*, atom_num(a), vdW_radius(atom_num(a))*bohr2angstrom
             if(r < rmin) rmin = r
@@ -1074,74 +1091,99 @@ end function rmse_multipole
 
 !-------------------------------------------------------------------------------
 ! computes the RMSE 
-subroutine do_analysis()
+subroutine do_analysis(vdw_grid_min_cutoff,vdw_grid_max_cutoff)
     implicit none
     real(rp), parameter :: hartree2kcalmol = 627.509469_rp
     real(rp), dimension(3) :: x ! position
-    integer :: idx, Nclose, Nmedium, Nfar
+    integer :: idx, Nclose, Nmedium, Nfar, npts
     real(rp) :: rmse_tot, rmse_close, rmse_medium, rmse_far, maxerror, currerror
+    real(rp) :: vdw_grid_min_cutoff,  vdw_grid_max_cutoff
+    real(rp) :: tmp_min_cutoff, tmp_max_cutoff
+
      
-    write(*,'(A30,A23,A23)')  "Measure","RMSE[kcal/mol/e]", "MaxError[kcal/mol/e]"   
+    write(*,'(A30,A23,A23,A10)')  "Measure","RMSE[kcal/mol/e]", "MaxError[kcal/mol/e]","NPoints"
     !compute total RMSE
     rmse_tot = 0._rp
     maxerror = 0._rp
+    npts = 0._rp
     do idx = 1,Ngrid
+      if(in_interaction_belt(gridval(:,idx),vdw_grid_min_cutoff, &
+          vdw_grid_max_cutoff)) then
+        npts = npts + 1
         currerror = (esp_grid2(idx) - esp_grid(idx))**2 
         rmse_tot = rmse_tot + currerror  
         if(currerror > maxerror) maxerror = currerror
+      end if
     end do    
-    write(*,'(A30,2ES23.9)') "Total", sqrt(rmse_tot/Ngridr)*hartree2kcalmol, sqrt(maxerror)*hartree2kcalmol
+    write(*,'(A30,2ES23.9,I10)') "Total", sqrt(rmse_tot/npts)*hartree2kcalmol, &
+        sqrt(maxerror)*hartree2kcalmol,npts
     
     !compute close RMSE (r < 1.66)
     Nclose = 0
     rmse_close = 0._rp
     maxerror = 0._rp
-    vdw_grid_min_cutoff = 1._rp
+    tmp_max_cutoff = vdw_grid_max_cutoff
     vdw_grid_max_cutoff = 1.66_rp
     do idx = 1,Ngrid
-        if(in_interaction_belt(gridval(:,idx))) then
+        if(in_interaction_belt(gridval(:,idx),vdw_grid_min_cutoff, &
+           vdw_grid_max_cutoff)) then
             Nclose = Nclose + 1
             currerror = (esp_grid2(idx) - esp_grid(idx))**2 
             rmse_close = rmse_close + currerror 
             if(currerror > maxerror) maxerror = currerror
         end if
     end do
-    if(Nclose > 0)  write(*,'(A30,2ES23.9)') "Close (1.00 < r < 1.66)", sqrt(rmse_close/real(Nclose,rp))*hartree2kcalmol, &
-                                                                        sqrt(maxerror)*hartree2kcalmol  
+    if(Nclose > 0)  write(*,'(A7,F6.2,A7,F6.2,A4,2ES23.9,I10)') "Close (", &
+       vdw_grid_min_cutoff," < r < ",vdw_grid_max_cutoff,")  ", &
+         sqrt(rmse_close/real(Nclose,rp))*hartree2kcalmol, &
+         sqrt(maxerror)*hartree2kcalmol, Nclose
+    vdw_grid_max_cutoff = tmp_max_cutoff
     
     !compute medium RMSE (1.66 < r < 2.20)
     Nmedium = 0
     rmse_medium = 0._rp
     maxerror = 0._rp
+    tmp_min_cutoff = vdw_grid_min_cutoff
+    tmp_max_cutoff = vdw_grid_max_cutoff
     vdw_grid_min_cutoff = 1.66_rp
     vdw_grid_max_cutoff = 2.20_rp
     do idx = 1,Ngrid
-        if(in_interaction_belt(gridval(:,idx))) then
+        if(in_interaction_belt(gridval(:,idx),vdw_grid_min_cutoff, &
+           vdw_grid_max_cutoff)) then
             Nmedium = Nmedium + 1
             currerror = (esp_grid2(idx) - esp_grid(idx))**2 
             rmse_medium = rmse_medium + currerror 
             if(currerror > maxerror) maxerror = currerror  
         end if
     end do
-    if(Nmedium > 0)  write(*,'(A30,2ES23.9)') "Mid-range (1.66 < r < 2.20)", sqrt(rmse_medium/real(Nmedium,rp))*hartree2kcalmol,&
-                                                                            sqrt(maxerror)*hartree2kcalmol
+    if(Nmedium > 0)  write(*,'(A11,F5.2,A7,F5.2,A2,2ES23.9,I10)') "Mid-range (",&
+         vdw_grid_min_cutoff," < r < ", &
+         vdw_grid_max_cutoff,") ", &
+         sqrt(rmse_medium/real(Nmedium,rp))*hartree2kcalmol,&
+         sqrt(maxerror)*hartree2kcalmol, Nmedium
+    vdw_grid_min_cutoff = tmp_min_cutoff
+    vdw_grid_max_cutoff = tmp_max_cutoff
     
     !compute far RMSE (2.20 < r < infinity)
     Nfar = 0
     rmse_far = 0._rp
     maxerror = 0._rp
+    tmp_min_cutoff = vdw_grid_min_cutoff
     vdw_grid_min_cutoff = 2.20_rp
-    vdw_grid_max_cutoff = huge(0._rp)
     do idx = 1,Ngrid
-        if(in_interaction_belt(gridval(:,idx))) then
+        if(in_interaction_belt(gridval(:,idx),vdw_grid_min_cutoff, &
+           vdw_grid_max_cutoff)) then
             Nfar = Nfar + 1
             currerror = (esp_grid2(idx) - esp_grid(idx))**2 
             rmse_far = rmse_far + currerror  
             if(currerror > maxerror) maxerror = currerror
         end if
     end do
-    if(Nfar > 0)  write(*,'(A30,2ES23.9)') "Far-range (2.20 < r)", sqrt(rmse_far/real(Nfar,rp))*hartree2kcalmol, &
-                                                                   sqrt(maxerror)*hartree2kcalmol
+    if(Nfar > 0)  write(*,'(A11,F6.2,A13,2ES23.9,I10)') "Far-range (", &
+           vdw_grid_min_cutoff," < r)", &
+           sqrt(rmse_far/real(Nfar,rp))*hartree2kcalmol, &
+           sqrt(maxerror)*hartree2kcalmol, Nfar
+    vdw_grid_min_cutoff = tmp_min_cutoff
     
 
 end subroutine do_analysis
@@ -1334,22 +1376,23 @@ end function coulomb_potential_single_multipole
 ! checks whether a point is inside the interaction belt as defined by the vdW radii
 ! Atomic Multipoles: Electrostatic Potential Fit, Local Reference Axis Systems,
 ! and Conformational Dependence
-logical function in_interaction_belt(q)
+logical function in_interaction_belt(q,mincut,maxcut)
     implicit none
     real(rp), dimension(:) :: q
     real(rp) :: r, rmin ! shortest distance to atom
+    real(rp) :: mincut, maxcut ! minimum and maximum grid cut-offs passed
     integer  :: i, a
     ! loop over the charge coordinates 
     do i = 1,size(q,dim=1),4
         !find atom with minimal relative distance
         rmin = huge(0._rp) 
         do a = 1,Natom
-            r = sqrt(sum((atom_pos(:,a)-q(i:i+2))**2))/vdW_radius(atom_num(a))
+            r = sqrt(sum((atom_pos(:,a)-q(i:i+2))**2))/(vdW_radius(atom_num(a)))
             !print*, atom_num(a), vdW_radius(atom_num(a))*bohr2angstrom
             if(r < rmin) rmin = r
         end do
         ! this means the radius is not in the defined interaction cutoff
-        if(.not.((rmin >= vdw_grid_min_cutoff) .and. (rmin <= vdw_grid_max_cutoff))) then
+        if(.not.((rmin >= mincut) .and. (rmin <= maxcut))) then
                 in_interaction_belt = .false.
                 !print*, r
                 return
@@ -2333,6 +2376,46 @@ end subroutine subtract_atom_multipole_ESP_from_grid
 !-------------------------------------------------------------------------------
 
 !-------------------------------------------------------------------------------
+subroutine add_atom_multipole_ESP_to_grid(mp,a)
+    implicit none
+    integer :: a !input atom
+    real(rp), dimension(:) :: mp !input multipole
+    integer :: i,j,k,l,m
+
+    !calculate the esp grid generated from just this multipole and subtract from
+    !total
+    do i = 1,Ngrid
+        esp_grid(i) = esp_grid(i) + coulomb_potential_single_multipole(gridval(:,i),mp,a)
+    end do
+
+    !calculate the slice data from just this multipole
+    do i = 1,NgridX
+        do j = 1,NgridY
+                sliceXY(i,j) = sliceXY(i,j) + coulomb_potential_single_multipole( &
+                     origin + (i-1)*axisX + (j-1)*axisY + (NgridZ/2-1)*axisZ,mp,a)
+        end do
+    end do
+
+    do i = 1,NgridX
+        do j = 1,NgridZ
+                sliceXZ(i,j) = sliceXZ(i,j) + coulomb_potential_single_multipole( &
+                     origin + (i-1)*axisX + (NgridY/2-1)*axisY + (j-1)*axisZ,mp,a)
+        end do
+    end do
+
+    do i = 1,NgridY
+        do j = 1,NgridZ
+                sliceYZ(i,j) = sliceYZ(i,j) + coulomb_potential_single_multipole( &
+                     origin + (NgridX/2-1)*axisX + (i-1)*axisY +(j-1)*axisZ,mp,a)
+        end do
+    end do
+
+end subroutine add_atom_multipole_ESP_to_grid
+!-------------------------------------------------------------------------------
+
+
+
+!-------------------------------------------------------------------------------
 ! read Gaussian cube files
 subroutine read_cube_file(filepath,density_filepath)
     implicit none
@@ -2459,7 +2542,8 @@ subroutine read_cube_file(filepath,density_filepath)
                 do k = 1,NgridZ
                     lcount = lcount + 1
                     x = origin + (i-1)*axisX + (j-1)*axisY + (k-1)*axisZ
-                    if(in_interaction_belt(x)) then !value gets added
+                    if(in_interaction_belt(x,vdw_grid_min_cutoff, &
+                       vdw_grid_max_cutoff)) then !value gets added
                         idx = idx + 1
                         read(30,'(ES13.5)',advance='no',iostat = ios) esp_grid(idx)
                         if(ios /= 0) call throw_error('Could not read ESP grid.')
@@ -2477,7 +2561,8 @@ subroutine read_cube_file(filepath,density_filepath)
                     
                     ! everything below is for later visualization with R (very useful to assess quality)
                     if( i == NgridX/2 ) then  
-                        if(.not.in_interaction_belt(x)) then !value is NOT used for fitting
+                        if(.not.in_interaction_belt(x,vdw_grid_min_cutoff, &
+                           vdw_grid_max_cutoff)) then !value is NOT used for fitting
                             usedYZ(j,k)  = .false.
                             sliceYZ(j,k) = rtmp
                         else
@@ -2485,7 +2570,8 @@ subroutine read_cube_file(filepath,density_filepath)
                         end if
                     end if
                     if( j == NgridY/2 ) then
-                        if(.not.in_interaction_belt(x)) then !value is NOT used for fitting
+                        if(.not.in_interaction_belt(x,vdw_grid_min_cutoff, &
+                           vdw_grid_max_cutoff)) then !value is NOT used for fitting
                             usedXZ(i,k)  = .false.
                             sliceXZ(i,k) = rtmp
                         else
@@ -2493,7 +2579,8 @@ subroutine read_cube_file(filepath,density_filepath)
                         end if
                     end if
                     if( k == NgridZ/2 ) then
-                        if(.not.in_interaction_belt(x)) then !value is NOT used for fitting
+                        if(.not.in_interaction_belt(x,vdw_grid_min_cutoff, &
+                           vdw_grid_max_cutoff)) then !value is NOT used for fitting
                             usedXY(i,j)  = .false.
                             sliceXY(i,j) = rtmp
                         else
@@ -2981,6 +3068,8 @@ subroutine read_command_line_arguments()
     
     ! check for the presence of required arguments
     if(analysis_mode) then !analysis mode
+        vdw_grid_min_cutoff = 1.2_rp
+        vdw_grid_max_cutoff = 100._rp
         if((trim(input_esp_cubefile) == '').or.(trim(compare_esp_cubefile) == '') &
            .or.(trim(input_density_cubefile) == '')) then
             call throw_error('Missing required arguments "-esp" and/or "-esp2" and/or "-dens"')
