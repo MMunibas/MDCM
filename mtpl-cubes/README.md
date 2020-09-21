@@ -2,7 +2,7 @@ Mike Devereux, 21.9.2020
 
 This folder contains 2 sets of scripts:
 
-* esp_gdma_grid
+#### esp_gdma_grid
 
 - can be used to take a GDMA-format "punch" file and two existing reference Gaussian
   format cube files, one containing the MEP and one containing the electron density
@@ -20,7 +20,7 @@ This folder contains 2 sets of scripts:
   the error in a program capable of rendering cube files acros isodensity surfaces 
   such as gaussview
 
-* esp_charmm_grid
+#### esp_charmm_grid
 
 - the purpose of these scripts is similar to esp_gdma_grid, except they do not 
   require nuclear coordinates in the GDMA file to correspond to coordinates in the
@@ -39,7 +39,7 @@ This folder contains 2 sets of scripts:
   cube file. You can then run the esp_gdma_grid scripts and the results should be
   the same for both to within a few tenths of a kcal
 
-* notes
+#### notes
 - as a general reminder when working with these scripts, remember that the gaussian
   cube file typically has coordinates written in Bohr, whereas CHARMM / PDB uses
   Angstrom
