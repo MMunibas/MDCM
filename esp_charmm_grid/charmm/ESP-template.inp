@@ -1,0 +1,119 @@
+* DCM water/ion params test for energy and forces
+*
+
+! Modify following variables:
+
+set base     /home/devereux/eric/esp_charmm_grid/charmm
+set pardir   @base/par
+set crddir   @base/crd
+set pdbfile  @crddir/acrolein_1200.pdb
+set lpunfile @base/../ref/acrolein_1200_lra.lpun
+
+SET NX 96 ! Number of X points in cube
+SET NY 77 ! Number of Y points in cube
+SET NZ 69 ! Number of Z points in cube
+
+SET DX 0.1014687 ! X spacing in cube
+SET DY 0.1014687 ! Y spacing in cube
+SET DZ 0.1014687 ! Z spacing in cube
+
+SET OX -4.42939 ! X origin in cube
+SET OY -3.91759 ! Y origin in cube
+SET OZ -3.48570 ! Z origin in cube
+
+stream @pardir/acrolein_2146.rtf
+stream @pardir/acrolein_2146.par
+
+! end modify
+
+!================================================================
+! Read coordinates
+!================================================================
+OPEN UNIT 1 READ FORM NAME @pdbfile
+READ SEQU PDB UNIT 1
+CLOSE UNIT 1
+GENERATE LIG FIRST NONE LAST NONE SETUP NOANG NODIHED
+
+! These coordinates should match those in the reference cube file
+! (converted to Angstrom)
+OPEN UNIT 1 READ FORM NAME @pdbfile
+READ COOR PDB UNIT 1
+CLOSE UNIT 1
+
+!================================================================
+! Crystal definition and cutoffs 
+!================================================================
+
+! Test system with long cut-offs:
+set ci   818.   ! inner switching cutoff
+set rc   820.   ! cutoff
+set ctl  822.   ! list-cutoff
+
+
+!================================================================
+!non bonded cut-offs
+!================================================================
+ NBOND CUTNB @ctl CTOFnb @rc CTONnb @ci -
+       atom vatom vdistance                        -
+     VSWITCH  SWITCH CDIE eps 1.0  e14fac 1.0  wmin 1.5
+
+ INTE SELE RESNAME LIG END SELE RESNAME K END
+
+!================================================================
+!Initialize user module: here MTP
+!================================================================
+open unit 40 card read name @lpunfile
+MTPL MTPUNIT 40 RON2 800.0 ROFF2 810.0 RON3 800.0 ROFF3 810.0 -
+  RON4 800.0 ROFF4 810.0 RON5 800.0 ROFF5 810.0
+close unit 40
+
+ INTE SELE RESNAME LIG END SELE RESNAME K END
+
+!================================================================
+! Generate cube file MEP data
+!================================================================
+
+open unit 41 write card name MEP.dat
+echu 41
+
+echo @NX @NY @NZ
+echo @DX @DY @DZ
+echo @OX @OY @OZ
+
+SET IX 1
+SET X @OX
+LABEL LOOPX
+SET Y @OY
+SET IY 1
+ LABEL LOOPY
+ SET Z @OZ
+ SET IZ 1
+  LABEL LOOPZ
+   SCALAR X SET @X SELE resname K END
+   SCALAR Y SET @Y SELE resname K END
+   SCALAR Z SET @Z SELE resname K END
+   INTE SELE RESNAME LIG END SELE RESNAME K END
+   echo ?ENER
+   INCR IZ BY 1
+   INCR Z BY @DZ
+  IF IZ LE @NZ GOTO LOOPZ
+  INCR Y BY @DY
+  INCR IY BY 1
+ IF IY LE @NY GOTO LOOPY
+INCR IX BY 1
+INCR X BY @DX
+IF IX LE @NX GOTO LOOPX
+
+close unit 41
+
+! OPEN UNIT 35 READ CARD NAME @base/h2o-wpolwq.dcm
+! OPEN UNIT 33 WRITE CARD NAME @base/dcm-charge-coords.xyz
+! DCM IUDCM 35 TSHIFT XYZ 33
+! CLOSE UNIT 35
+! 
+! ENERGY
+!
+! TEST FIRST TOLER 0.00001
+
+stop
+
