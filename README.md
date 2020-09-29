@@ -2,10 +2,18 @@
 Machine learning code to fit Minimal Distributed Charge Models (MDCMs)
 
 ## Authors:
-Oliver Unke (original author) and Mike Devereux (Michael.Devereux@unibas.ch)
+MDCM scripts and code by Mike Devereux (Michael.Devereux at unibas.ch) except:
+* **differential_evolution.f90** by Shun Sakuraba
+* **cubefit** original implementation by Oliver Unke, updated and extended by Mike Devereux 
+* **punch-to-dcm.f90** original implementation by Shampa Raghunathan, updated by Mike Devereux
+* **mtpfit.py** by Oliver Unke
+Additional code required for multipole cube generation example:
+* **examples/mtpl-cubes/.../tristan-espfit/\*** Tristan Bereau and Christian Kramer
+
 
 ## References:
-*Unke, O. T.; Devereux, M.; Meuwly, M. Minimal distributed charges:  Multipolar qual-ity at the cost of point charge electrostatics.J. Chem. Phys.2017,147, 161712*
+*Unke, O. T.; Devereux, M.; Meuwly, M.; Minimal distributed charges:  Multipolar quality at the cost of point charge electrostatics. J. Chem. Phys.2017,147, 161712*
+*Devereux, M.; Pezzella, M.; Raghunathan, S.; Meuwly, M.; Polarizable Multipolar Molecular Dynamics Using Distributed Point Charges. Submitted Aug. 2020*
 
 ## Code Overview:
 Three utilities are provided:
