@@ -96,5 +96,17 @@ The simplest way to use the code for your own system is to adapt one of the exam
 1. DE fitting of MDCMs for fragments or of a whole molecule with the specified number of charges. Scaling with number of charges is bad so a fragment approach allows linear scaling for large molecules at the cost of some accuracy and redundancy of charges in the final model
 1. Combination of fitted fragment models with the lowest RMSE to create promising molecular MDCMs
 1. Refinement of the assembled molecular models in this case using a simplex algorithm to allow scalability to larger systems. DE refinement would likely yield better results in a reasonable time (several hours) for small systems with up to ca. 18 charges.
-* The example is run stepwise using the scripts in the various folders in numerical order
+* The example is run stepwise by adapting and running the scripts in the various folders in numerical order
 * The final output is an MDCM in the global axis in .xyz file format with fitted charges added in a 5th column after the atomic coordinates in each line
+
+### dcm
+* This example provides basic scripts to convert a GDMA format multipole file to a fixed DCM (not MDCM!) charge arrangement. 
+* No fitting is required, the process is an analytical conversion. See https://doi.org/10.1021/ct500511t for details
+* In constrast to MDCM, the conversion process is fast (few seconds), but results in redundant charges that will slow down subsequent evaluations of the electrostatic interaction
+* The example is run by modifying and executing the dcm-cube-gen.sh script
+
+### mtpl-cubes
+* This example uses neither DCM nor MDCM, but is useful for comparing the performance of multipolar models with (M)DCMs in certain scenarios
+* The example consists of 2 folders
+**esp_gdma_grid** provides a workflow in 1-convert-punch.sh to create a Gaussian format MEP cube file from a GDMA file where both the GDMA file and the reference Gaussian cube files are in the same global axis. The reference Gaussian cube files are used to determine the MEP grid parameters, and the GDMA MEP is compared to the reference cube files after the GDMA multipolar MEP cube file has been generated
+**esp_charmm_grid** provides a similar workflow in 1-convert-pun2lpun.sh and 2-run-charmm.sh to generate an MEP cube file from GDMA multipole moments where the GDMA moments are in a different axis system to the reference cube file data. This is useful for example when checking the performance of GDMA multipole moments from the equilibrium geometry of a molecule in describing the MEP around the molecule in an arbitrary conformation from an MD simulation. To achieve this an axis system transformation is necessary, here we use CHARMM's MTPL module for this purpose. Note that the code requires rdkit to generate the CHARMM-format 'lpun' parameter file. Upon completion the GDMA-derived MEP cube file is again compared to the reference cube file to assess the agreement across different regions of the MEP grid.
