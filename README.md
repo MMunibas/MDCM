@@ -12,7 +12,7 @@ Additional code required for multipole cube generation example:
 
 
 ## References:
-*Unke, O. T.; Devereux, M.; Meuwly, M.; Minimal distributed charges:  Multipolar quality at the cost of point charge electrostatics. J. Chem. Phys.2017,147, 161712*
+*Unke, O. T.; Devereux, M.; Meuwly, M.; Minimal distributed charges:  Multipolar quality at the cost of point charge electrostatics. J. Chem. Phys.2017,147, 161712*<br>
 *Devereux, M.; Pezzella, M.; Raghunathan, S.; Meuwly, M.; Polarizable Multipolar Molecular Dynamics Using Distributed Point Charges. Submitted Aug. 2020*
 
 ## Code Overview:
