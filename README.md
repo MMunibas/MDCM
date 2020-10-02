@@ -7,7 +7,7 @@ MDCM scripts and code by Mike Devereux (Michael.Devereux at unibas.ch) except:
 * **cubefit** original implementation by Oliver Unke, updated and extended by Mike Devereux 
 * **punch-to-dcm.f90** original implementation by Shampa Raghunathan, updated by Mike Devereux
 * **mtpfit.py** by Oliver Unke
-Additional code required for multipole cube generation example:
+<br>Additional code required for multipole cube generation example:<br>
 * **examples/mtpl-cubes/.../tristan-espfit/\*** Tristan Bereau and Christian Kramer
 
 
