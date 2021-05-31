@@ -258,7 +258,9 @@ for(my $ix=0;$ix<$nxpts;$ix++){
       printf OUT "%13.5e",$pot;
       if($iz % 6 == 5){ print OUT "\n"; }
     }
-    print OUT "\n";
+    if($nzpts % 6 != 0){
+      print OUT "\n";
+    }
   }
 }
 
