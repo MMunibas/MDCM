@@ -2,6 +2,8 @@
 !
 !      main.f90
 !      Created: 9 May 2016 at 09:54
+!      Orignal author: Oliver Unke
+!      Updated and extended by Mike Devereux
 !
 !///////////////////////////////////////////////////////////////////////////////
 program cubefit
