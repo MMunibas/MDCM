@@ -1,3 +1,8 @@
+! Differential Evolution module written by Oliver Unke, including module "xorshift1024ast"
+! by Shun Sakuraba
+
+module xorshift1024ast
+
 ! Copyright (c) 2015 Shun Sakuraba
 ! 
 ! This software is provided 'as-is', without any express or implied
@@ -21,7 +26,6 @@
 ! (Sebastiano Vigna. An experimental exploration of Marsaglia's xorshift generators, scrambled. CoRR, abs/1402.6246, 2014.)
 ! xorshift1024* is a pseudorandom generator with a reasonable speed and a good state space size. This is a standard choice of the generator.
 
-module xorshift1024ast
   implicit none
   
   ! random number state
@@ -215,6 +219,7 @@ end module xorshift1024ast
 !
 !      differential_evolution.f90
 !      Created: 29 April 2016 at 16:53
+!      Author: Oliver Unke
 !
 !///////////////////////////////////////////////////////////////////////////////
 !TODO: deallocate everything at the end
