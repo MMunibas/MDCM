@@ -1,9 +1,11 @@
 F90 = gfortran
 #F90 = /usr/local/bin/mpif90
 
-FFLAGS_PAR = -fopenmp -O3
+#FFLAGS_PAR = -fopenmp
+FFLAGS_PAR = -fopenmp -fcheck=bounds,mem -g
 LFLAGS_PAR = -fopenmp 
-FFLAGS     = -O3
+#FFLAGS     = -O3
+FFLAGS     = -fcheck=bounds,mem -g -Wunused
 LFLAGS     = 
 
 ##########################
@@ -12,10 +14,12 @@ LFLAGS     =
 
 OBJS = \
 differential_evolution.o \
+symmetry.o \
 main.o \
 
 OBJS_PAR = \
 pdifferential_evolution.o \
+symmetry.o \
 main.o \
 
 all : cubefit.x pcubefit.x clean
@@ -37,6 +41,9 @@ differential_evolution.o : src/differential_evolution.f90
 	
 pdifferential_evolution.o : src/differential_evolution.f90
 	$(F90) -c $(FFLAGS_PAR) $(INCLUDES) -o $@ src/differential_evolution.f90
+
+symmetry.o : src/symmetry.f90
+	$(F90) -c $(FFLAGS) $(INCLUDES) -o $@ src/symmetry.f90
 
 main.o : src/main.f90 \
 differential_evolution.o
