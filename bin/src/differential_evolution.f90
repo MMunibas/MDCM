@@ -274,7 +274,6 @@ subroutine DE_init(set_range, set_popSize, set_crossProb, set_diffWeight, set_ma
     logical,  intent(in), optional       :: set_forceRange
     logical,  intent(in), optional       :: set_verbose
     integer,  intent(in), optional       :: set_Nprint
-    integer :: i
     
     if(size(set_range, dim=1) /= 2) &
         call DE_error("DE_init",&
@@ -435,10 +434,10 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
     
     real(rp), dimension(dim,4) :: m  !randomly selected individuals
     real(rp), dimension(4)     :: fm !and their function values
-    real(rp), dimension(size(x,dim=1)) :: child, mutant, v
+    real(rp), dimension(size(x,dim=1)) :: child, mutant
     real(rp), parameter :: eps = 1.e-12_rp
     real(rp) :: ranr, f, constr, popSizer, fbestlast
-    integer :: j, gen, p, d, c, rani, bestindx, dum, mutVar, bestlast
+    integer :: gen, p, d, c, rani, bestindx, dum, mutVar, bestlast
 
     logical :: converged, fsble, booldummy
     
@@ -661,6 +660,7 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
     x = pop(:,bestindx)
     if(verbose.and..not.feasible(x)) write(*, '(A)') "WARNING: No feasible solution was found!"
     write(*, '(A)') "Starting local simplex optimization:"
+print*,x
     write(*,'(A28,ES21.10)') "Solution before refinement: ", fpop(bestindx)
     if(feasible(x)) call DE_simplex(func,feasible,x)
     write(*,'(A28,ES21.10)') "Solution after  refinement: ", func(x)

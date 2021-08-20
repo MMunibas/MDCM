@@ -2,13 +2,13 @@
 !
 !      main.f90
 !      Created: 9 May 2016 at 09:54
-!      Orignal author: Oliver Unke
+!      Author: Oliver Unke
 !      Updated and extended by Mike Devereux
 !
 !///////////////////////////////////////////////////////////////////////////////
 program cubefit
 use differential_evolution
-!use symmetry
+use symmetry
 implicit none
 
 real(rp), parameter :: bohr2angstrom      = 0.52917721067_rp
@@ -80,7 +80,7 @@ logical  :: verbose           = .false. ! toggles printing mode
 logical  :: use_greedy_fit    = .false. ! greedily fit individual multipoles first
 logical  :: greedy_only_multi = .false. ! stops greedy fit after fitting atomic multipoles
 logical  :: simplex_only      = .false. ! perform only simplex refinement, no D.E.
-!logical  :: use_symmetry      = .false. ! toggles symmetry constraint mode
+logical  :: use_symmetry      = .false. ! toggles symmetry constraint mode
 logical  :: fit_multipoles    = .false. ! fit multipoles instead of charges
 logical  :: generate_atomic   = .false. ! for visualizing charge fits
 logical  :: refine_solution   = .false. ! when used to refine a solution
@@ -135,9 +135,11 @@ real(rp), dimension(3)                :: atom_com                      ! stores 
 real(rp), dimension(:), allocatable :: multipole                       ! stores multipole parameters
 
 real(rp), dimension(:,:,:), allocatable :: multipole_solutions         ! stores charge positions for the multipole fits (num_charges_max_multipole*4,num_charges_max_multipole,Natom)
+real(rp), dimension(:), allocatable :: mapsol                          ! temporary charge array
+real(rp), dimension(:,:,:), allocatable :: sym_multipole_solutions     ! stores charge positions for the multipole fits with symmetry constraints (num_charges_max_multipole*4,num_charges_max_multipole,Natom)
 real(rp), dimension(:,:), allocatable   :: multipole_solutions_rmse    ! stores RMSE of the multipole solutions (needed for greedy mode)
 real(rp), dimension(:), allocatable :: multipole_best, multipole_save  ! current best charge fit in the multipole fit
-real(rp), dimension(:,:,:), allocatable, save :: symmetry_ops          ! stores the symmetry operations in matrix form
+!real(rp), dimension(:,:,:), allocatable, save :: symmetry_ops          ! stores the symmetry operations in matrix form
 
 ! these are only used for visualizing the grid with R in the end
 real(rp), dimension(:,:), allocatable :: sliceXY,sliceXZ,sliceYZ       ! cuts along planes
@@ -156,10 +158,12 @@ real(rp), dimension(:,:), allocatable :: search_range ! has a minimum and a maxi
 
 ! for error handling
 integer :: ios
+logical :: file_exists
 
-integer :: i,j,k,a,b,try,qdim, lcheck !current dimensionality of charge
+integer :: i,j,k,a,a1,a2,b,try,qdim,sqdim,flag,lcheck !current dimensionality of charge
 
-real(rp) :: tmp, tmp2, RMSE_best, RMSE_tmp, MAE_tmp, maxAE_tmp
+real(rp) :: tmp, RMSE_best, RMSE_tmp, MAE_tmp, maxAE_tmp
+
 
 call system("mkdir -p slices")
 
@@ -278,20 +282,20 @@ if(generate_mode) then
     stop
 end if
 
-!! initialize symmetry module
-!if(use_symmetry) then
-!        if(verbose) write(*,'(A)')
-!        if(verbose) write(*,'(A)') "Initializing symmetry module..."
-!        if(verbose) write(*,'(A)')
-!        call symmetry_init(Natom, transpose(atom_pos), real(atom_num(:),rp))
-!        atom_com = centerOfMass(transpose(atom_pos))
+! initialize symmetry module
+if(use_symmetry) then
+        if(verbose) write(*,'(A)')
+        if(verbose) write(*,'(A)') "Initializing symmetry module..."
+        if(verbose) write(*,'(A)')
+        call symmetry_init(Natom, transpose(atom_pos), real(atom_num(:),rp))
+        atom_com = centerOfMass(transpose(atom_pos))
 !        if(.not.allocated(symmetry_ops)) allocate(symmetry_ops(3,3,size(unique_ops,dim=1)))
 !        do i = 1,size(unique_ops,dim=1)
 !            symmetry_ops(:,:,i) = unique_ops(i)%M
 !        end do
-!        if(verbose) write(*,'(A)')
-!        if(verbose) write(*,'(A)') "...done!"    
-!end if
+        if(verbose) write(*,'(A)')
+        if(verbose) write(*,'(A)') "...done!"    
+end if
 
 if(verbose) write(*,*) 
 if(verbose) write(*,*) 
@@ -299,6 +303,9 @@ if(verbose) write(*,*)
 
 !when fitting the atomic multipoles instead of charges
 if(fit_multipoles) then
+    if(use_symmetry) then ! should have been caught earlier during argument parsing!
+      call throw_error('sorry, symmetry module does not yet work with multipole fits')
+    end if
     write(*,'(A)') "FITTING ATOMIC MULTIPOLES"
     write(*,'(A)') "WARNING: THIS ROUTINE IS NOT EFFICIENT!"
     write(*,'(A)') "USE FOR TESTING PURPOSES ONLY!!"
@@ -396,6 +403,44 @@ end if
 
 !when fitting atomic charges to the atomic multipoles
 if(use_greedy_fit) then
+
+    if(use_symmetry) then 
+      ! first remove atoms that are redundant due to symmetry
+      do b = 1,natmfit
+        a = fitatoms(b)
+        flag=0
+        do i=1,Natom 
+          if(count(atom_sea(i,:) /= 0) == 0) exit
+          if(a.eq.atom_sea(i,1)) flag=1
+        end do
+        if(flag.eq.0)then
+          if(verbose) then
+            write(*,'(A,I0,A)') 'Atom ',a,' is redundant by symmetry, ignoring.'
+            do i=b,natmfit-1
+              fitatoms(i)=fitatoms(i+1)
+            enddo
+            natmfit=natmfit-1
+            write(*,'(I0,A)') natmfit,' atoms remain'
+          endif
+        endif
+      end do
+      ! of the remaining symmetry-unique atoms, check which symmetry ops leave
+      ! nuclear coordinates untouched as these need to be applied to charges
+      ! during the fit
+!      if(.not.allocated(num_sym_ops)) allocate(num_sym_ops(Natom))
+      do b = 1,natmfit
+        a = fitatoms(b)
+        i=getChargeOps(a)
+      enddo ! b
+      ! now initialize how many charges are spawned by each of these sym ops
+      ! for charges placed along rotational axes, in mirror planes etc.
+      do b = 1,natmfit
+        a = fitatoms(b)
+        call get_chgs_spawned(a)
+      enddo ! b
+
+    endif ! use_symmetry
+
     write(*,'(A)') "USING GREEDY MODE"
     !save the values for the full ESP (individual multipoles will be saved into there)
     if(.not.allocated(esp_grid2)) allocate(esp_grid2(NgridX*NgridY*NgridZ))
@@ -412,6 +457,8 @@ if(use_greedy_fit) then
     if(.not.allocated(multipole))                 allocate(multipole((lmax+1)**2*Natom))
     if(.not.allocated(multipole_solutions))       allocate( &
        multipole_solutions(num_charges_max_multipole*4,num_charges_max_multipole,Natom))
+    if(.not.allocated(sym_multipole_solutions))       allocate( &
+       sym_multipole_solutions(num_charges_max_multipole*4,num_charges_max_multipole,Natom))
     if(.not.allocated(multipole_solutions_rmse))  allocate( &
        multipole_solutions_rmse(0:num_charges_max_multipole,Natom))
     if(.not.allocated(multipole_best))            allocate( &
@@ -444,12 +491,38 @@ if(use_greedy_fit) then
             multipole_solutions_rmse(0,a) = multipole_solutions_rmse(0,a) + esp_grid(k)**2
         end do
         multipole_solutions_rmse(0,a) = sqrt(multipole_solutions_rmse(0,a)/Ngridr)
-                
+
         do num_charges = num_charges_min_multipole,num_charges_max_multipole
             !current dimensionality
             qdim = 4*num_charges-1
         
             !check whether a fit exists already, if yes, we do nothing
+            if(use_symmetry)then !read existing symmetry-constrained parameters
+              write(dummystring,'(I0)') a
+              write(dummystring2,'(I0)') num_charges
+              if(trim(prefix) /= '') then
+                  dummystring = trim(prefix)//"/symatm"//trim(dummystring)//"_"//trim(dummystring2)//"charges.fit"
+              else
+                  dummystring = "symatm"//trim(dummystring)//"_"//trim(dummystring2)//"charges.fit"
+              end if
+              
+              file_exists=read_sym_file(dummystring,multipole_solutions(:,num_charges,a),&
+                  sqdim,num_charges,a,num_charges_max_multipole)
+              if(file_exists)then
+                !calculate the RMSE of the loaded solution
+                multipole_solutions_rmse(num_charges,a) = sym_rmse_qtot( &
+                                  multipole_solutions(1:sqdim,num_charges,a))
+                !print*, multipole_solutions_rmse(num_charges,a)
+                if(verbose) then
+                    write(*,'(A)') 'File "'//trim(dummystring)//'" already exists.'//&
+                                                   " Fitting procedure is skipped."
+  
+                end if
+                cycle
+              endif
+            endif
+            dummystring=''
+            dummystring2=''
             write(dummystring,'(I0)') a
             write(dummystring2,'(I0)') num_charges
             if(trim(prefix) /= '') then
@@ -486,22 +559,51 @@ if(use_greedy_fit) then
             ! initialize RMSE    
             multipole_solutions_rmse(num_charges,a) = vbig
 
-            ! initialize search_range
-            call init_search_range()
-            call DE_init(set_range            = search_range(:,1:qdim), &
-                         set_popSize          = 10*qdim,                &
-                         set_maxGens          = 2000*num_charges,       &
-                         set_crossProb        = 1.00_rp,                &
-                         set_maxChilds        = 1,                      &
-                         set_forceRange       = .false.,                &
-                         set_mutationStrategy = DEtargettobest1,        &
-                         set_verbose          = verbose,                &
-                         set_Nprint           = 100)  
+            if(.not.use_symmetry)then
+              ! general coding strategy: create a new parameter array based on axes and planes and fit that, then convert back to overwrite qdim with the best solution
+  
+              ! initialize search_range
+              call init_search_range()
+  
+              call DE_init(set_range            = search_range(:,1:qdim), &
+                           set_popSize          = 10*qdim,                &
+                           set_maxGens          = 2000*num_charges,       &
+                           set_crossProb        = 1.00_rp,                &
+                           set_maxChilds        = 1,                      &
+                           set_forceRange       = .false.,                &
+                           set_mutationStrategy = DEtargettobest1,        &
+                           set_verbose          = verbose,                &
+                           set_Nprint           = 100)  
+            endif
             do try = 1,num_trials
                 if(verbose) write(*,'(3(A,I0))') "Starting fitting procedure for multipole expansion of atom ",a,&
                                                    " with ",num_charges," charges, trial ",try
-                call DE_optimize(rmse_qtot,feasible,sum_constr,&
+                if(use_symmetry)then
+                  ! (re)initialize symmetry-constrained search
+                  call DE_exit()
+                  if(.not.init_sym_search(num_charges,a)) cycle !skip if no fit exists with this combination of number of charges and symmetry constraints
+                  call init_sym_search_range(search_range,a,max_extend,max_charge,sqdim)
+    
+                  call DE_init(set_range            = search_range(:,1:sqdim), &
+                               set_popSize          = 10*sqdim,                &
+                               set_maxGens          = 2000*num_charges,        &
+                               set_crossProb        = 1.00_rp,                 &
+                               set_maxChilds        = 1,                       &
+                               set_forceRange       = .false.,                 &
+                               set_mutationStrategy = DEtargettobest1,         &
+                               set_verbose          = verbose,                 &
+                               set_Nprint           = 100)
+                  call DE_optimize(sym_rmse_qtot,sym_feasible,sym_sum_constr,&
+                        sym_multipole_solutions(1:sqdim,num_charges,a),&
+                        init_pop=sym_init_pop_multipole)
+                  call spawn_sym_chgs(sym_multipole_solutions(1:sqdim,num_charges,a),&
+                        multipole_solutions(1:qdim,num_charges,a),&
+                        num_charges,a,total_charge)
+                else
+                  call DE_optimize(rmse_qtot,feasible,sum_constr,&
                         multipole_solutions(1:qdim,num_charges,a),init_pop=init_pop_multipole)
+                endif
+
                 ! measure the quality of the fit
                 RMSE_tmp = rmse_qtot(multipole_solutions(1:qdim,num_charges,a)) 
                 if(verbose) write(*,'(A,ES23.9,A)') "RMSE ", RMSE_tmp, "Hartree"
@@ -512,7 +614,27 @@ if(use_greedy_fit) then
                     MAE_tmp   = mae_qtot(multipole_solutions(1:qdim,num_charges,a))
                     maxAE_tmp = max_ae_qtot(multipole_solutions(1:qdim,num_charges,a))
                     ! write results to file        
-                    call write_xyz_file(multipole_solutions(1:qdim,num_charges,a),a)            
+                    call write_xyz_file(multipole_solutions(1:qdim,num_charges,a),a)
+                    if(use_symmetry)then
+                      if(allocated(mapsol)) deallocate(mapsol)
+                      allocate(mapsol(num_charges*4))
+                      !create xyz files for symmetry equivalent atoms
+                      do i=1,Natom
+                        if(count(atom_sea(i,:) /= 0) == 0) exit
+                        a1=atom_sea(i,1)
+                        if(a1.ne.a) cycle ! cycle if this is the wrong sea group for atom a
+                        do j=2,Natom 
+                          if(atom_sea(i,j) == 0) exit
+                          a2=atom_sea(i,j)
+                          call sym_map_sea_q_coords(&
+                             multipole_solutions(1:qdim,num_charges,a),mapsol,a1,a2,&
+                             num_charges)
+                          call write_xyz_file(mapsol,a2)
+                        enddo
+                      enddo
+                      call write_sym_file(sym_multipole_solutions(1:sqdim,num_charges,a),&
+                                          a,num_charges)
+                    endif
                     !call write_cube_file(multipole_solutions(1:qdim,num_charges,a),a)
                     ! plot with R
                     call write_image_slice_data(multipole_solutions(1:qdim,num_charges,a)) !for visualization with R
@@ -525,7 +647,8 @@ if(use_greedy_fit) then
                     else
                         dummystring = "multipole"//trim(dummystring)//"_"//trim(dummystring2)//"charges_comparison.png"
                     end if
-                    call execute_command_line("mv comparison.png "//trim(dummystring),wait=.true.)
+                    call execute_command_line("mv comparison.png "&
+                    //trim(dummystring),wait=.true.)
                     if(verbose) write(*,*)
                 end if
             end do
@@ -569,6 +692,7 @@ if(use_greedy_fit) then
                                             
                     end if
                 end do
+flush(6)
             end if
             if(verbose) write(*,*)
             
@@ -637,6 +761,10 @@ endif
 
 !refining the solution
 if(refine_solution) then
+    ! symmetry not yet implemented for refinement
+    if(use_symmetry)then
+      call throw_error('Sorry, symmetry is not yet implemented for model refinement')
+    endif
     open(30, file=trim(input_xyzfile), status="old", action="read", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "'//trim(input_xyzfile)//'" for reading')
     read(30,*,iostat=ios) num_charges
@@ -910,6 +1038,25 @@ end function sum_constr_multipole
 !-------------------------------------------------------------------------------
 
 !-------------------------------------------------------------------------------
+! checks feasibility of fitting solution with symmetry constraints
+logical function sym_feasible(sq)
+    implicit none
+    real(rp), dimension(:) :: sq ! input charges
+    real(rp), dimension(num_charges*4) :: q   ! complete charges
+    real(rp) :: qsum
+    integer :: a,b
+    qsum = 0._rp
+
+    do b = 1,natmfit
+      a = fitatoms(b)
+      call spawn_sym_chgs(sq,q,num_charges,a,total_charge) ! apply sym ops to sqin to populate q
+    enddo
+
+    sym_feasible = feasible(q)
+end function sym_feasible
+!-------------------------------------------------------------------------------
+
+!-------------------------------------------------------------------------------
 ! checks whether a value is feasible (in constraints)
 logical function feasible(q)
     implicit none
@@ -1038,6 +1185,24 @@ end function feasible
 !!-------------------------------------------------------------------------------
 
 
+!-------------------------------------------------------------------------------
+real(rp) function sym_sum_constr(sq)
+    implicit none
+    real(rp), dimension(:) :: sq ! input charges
+    real(rp), dimension(num_charges*4) :: q   ! complete charges
+    real(rp) :: qsum
+    integer :: a,b
+    qsum = 0._rp
+
+    do b = 1,natmfit
+      a = fitatoms(b)
+      call spawn_sym_chgs(sq,q,num_charges,a,total_charge) ! apply sym ops to sqin to populate q
+    enddo
+
+    sym_sum_constr = sum_constr(q)
+end function sym_sum_constr
+!-------------------------------------------------------------------------------
+
 
 !-------------------------------------------------------------------------------
 ! returns the sum of constraint violations
@@ -1082,10 +1247,33 @@ real(rp) function rmse_qtot(qin)
     do i = 1,size(qin,dim=1)-3,4
         qsum = qsum + qin(i+3)
     end do
-    q = qin
+    q(1:size(qin,dim=1)) = qin(:)
     q(size(q,dim=1)) = total_charge - qsum
     rmse_qtot = rmse(q)
 end function rmse_qtot
+!-------------------------------------------------------------------------------
+
+
+!-------------------------------------------------------------------------------
+! computes root mean squared error of the current fit to the true esp, using constraint
+! charges (this means that the total charge must add up to a specific value) and 
+! applyng symmetry operations to spawn additional charges until symmetry constraints
+! are satisfied (i.e. charge arrangement possesses same symmetry as parent molecule)
+real(8) function sym_rmse_qtot(sqin)
+    implicit none
+    real(rp), dimension(:) :: sqin ! input charges
+    real(rp), dimension(num_charges*4) :: q   ! complete charges
+    real(rp) :: qsum
+    integer :: a,b
+    qsum = 0._rp
+
+    do b = 1,natmfit
+      a = fitatoms(b)
+      call spawn_sym_chgs(sqin,q,num_charges,a,total_charge) ! apply sym ops to sqin to populate q
+    enddo
+
+    sym_rmse_qtot = rmse(q)
+end function sym_rmse_qtot
 !-------------------------------------------------------------------------------
 
 
@@ -1123,7 +1311,6 @@ end function rmse_multipole
 subroutine do_analysis(vdw_grid_min_cutoff,vdw_grid_max_cutoff)
     implicit none
     real(rp), parameter :: hartree2kcalmol = 627.509469_rp
-    real(rp), dimension(3) :: x ! position
     integer :: idx, Nclose, Nmedium, Nfar, npts
     real(rp) :: rmse_tot, rmse_close, rmse_medium, rmse_far, maxerror, currerror
     real(rp) :: vdw_grid_min_cutoff,  vdw_grid_max_cutoff
@@ -1238,7 +1425,7 @@ real(rp) function mae_qtot(qin)
     do i = 1,size(qin,dim=1)-3,4
         qsum = qsum + qin(i+3)
     end do
-    q = qin
+    q(1:size(qin,dim=1)) = qin(:)
     q(size(q,dim=1)) = total_charge - qsum
     mae_qtot = mae(q)
 end function mae_qtot
@@ -1249,7 +1436,6 @@ end function mae_qtot
 real(rp) function mae(q)
     implicit none
     real(rp), dimension(:) :: q ! input charges
-    real(rp), dimension(3) :: x ! position
     integer :: idx
     mae = 0._rp
     do idx = 1,Ngrid
@@ -1272,7 +1458,7 @@ real(rp) function max_ae_qtot(qin)
     do i = 1,size(qin,dim=1)-3,4
         qsum = qsum + qin(i+3)
     end do
-    q = qin
+    q(1:size(qin,dim=1)) = qin(:)
     q(size(q,dim=1)) = total_charge - qsum
     max_ae_qtot = max_ae(q)
 end function max_ae_qtot
@@ -1283,7 +1469,6 @@ end function max_ae_qtot
 real(rp) function max_ae(q)
     implicit none
     real(rp), dimension(:) :: q ! input charges
-    real(rp), dimension(3) :: x ! position
     real(rp) :: ae
     integer :: idx
     max_ae = -vbig
@@ -1546,11 +1731,10 @@ subroutine init_pop_greedy(pop)
     implicit none
     real(rp), dimension(:,:), intent(out) :: pop 
     real(rp), dimension(size(pop,dim=1))  :: prototype
-    real(rp), dimension(3) :: ranvec
     real(rp) :: ran, sumP, charge_correction
     real(rp), dimension(Natom) :: improvementProbability
     integer, dimension(Natom)  :: chargesPerAtom
-    integer  :: popSize, a, d, p, dimStart, dimEnd
+    integer  :: popSize, a, p, dimStart, dimEnd
     
     popSize = size(pop,dim=2)    
     
@@ -1674,6 +1858,23 @@ end subroutine init_pop_multipole
 !-------------------------------------------------------------------------------
 
 
+!-------------------------------------------------------------------------------
+! initializes the population to only feasible symmetry solutions
+subroutine sym_init_pop_multipole(pop)
+    implicit none
+    real(rp), dimension(:,:), intent(out) :: pop
+    integer  :: popSize, p
+
+    popSize = size(pop,dim=2)
+
+    ! loop over population
+    do p = 1,popSize
+      call sym_init_pars(pop(:,p),a,multipole(a),vdW_scaling,&
+           vdW_radius(atom_num(a)))
+    end do
+end subroutine sym_init_pop_multipole
+!-------------------------------------------------------------------------------
+
 
 !-------------------------------------------------------------------------------
 subroutine read_multipole_file(inpfile)
@@ -1681,7 +1882,6 @@ implicit none
 character(len=*), intent(in) :: inpfile
 integer :: ios,idx,l,a,m
 character(len=1024) :: dummy1,dummy2
-real(rp) :: tmp
 
 open(30, file=trim(inpfile), status="old", action="read", iostat = ios)
 if(ios /= 0) call throw_error('Could not open "'//trim(inpfile)//'" for reading')
@@ -1739,7 +1939,7 @@ end subroutine read_xyz_file
 ! writes a xyz file containing the results
 subroutine write_xyz_file(charges,a,filename)
 implicit none 
-integer :: ios
+integer :: ios,i
 integer, optional :: a
 real(rp), dimension(qdim), intent(in) :: charges
 character(len=*), intent(in), optional :: filename
@@ -1813,13 +2013,15 @@ close(30)
 end subroutine write_xyz_file
 !-------------------------------------------------------------------------------
 
+
+
 !-------------------------------------------------------------------------------
 ! write multipole solution to a file
 subroutine write_multipole_file(mp)
     implicit none 
     integer :: ios,l,m,a,idx
     real(rp), dimension(:) :: mp !multipoles
-    character(len=1024) :: outfile, dummy
+    character(len=1024) :: outfile
     
     !decide filename
     select case (lcur)
@@ -2374,7 +2576,7 @@ subroutine calc_multipole_grid_and_slice_data(mp,a)
     implicit none
     integer :: a !input atom
     real(rp), dimension(:) :: mp !input multipole
-    integer :: i,j,k,l,m
+    integer :: i,j
     
     !calculate the esp grid generated from just this multipole
     do i = 1,Ngrid
@@ -2408,7 +2610,7 @@ subroutine subtract_atom_multipole_ESP_from_grid(mp,a)
     implicit none
     integer :: a !input atom
     real(rp), dimension(:) :: mp !input multipole
-    integer :: i,j,k,l,m
+    integer :: i,j
 
     !calculate the esp grid generated from just this multipole and subtract from
     !total
@@ -2446,7 +2648,7 @@ subroutine add_atom_multipole_ESP_to_grid(mp,a)
     implicit none
     integer :: a !input atom
     real(rp), dimension(:) :: mp !input multipole
-    integer :: i,j,k,l,m
+    integer :: i,j
 
     !calculate the esp grid generated from just this multipole and subtract from
     !total
@@ -2992,8 +3194,8 @@ subroutine read_command_line_arguments()
         if(arg(1:l) == '-onlymultipoles') greedy_only_multi = .true. 
 
         
-!        ! read symmetry flag
-!        if(arg(1:l) == '-sym') use_symmetry = .true. 
+        ! read symmetry flag
+        if(arg(1:l) == '-sym') use_symmetry = .true. 
 
         ! read list of atoms to fit (fortran is terrible at this...)
         if(arg(1:l) == '-atom') then
@@ -3144,6 +3346,10 @@ subroutine read_command_line_arguments()
     
     if(analysis_mode.and.generate_mode) then
         call throw_error('Only one flag allowed: either "-analysis" or "-generate"')
+    end if
+
+    if(use_symmetry.and.fit_multipoles) then
+        call throw_error('Only one flag allowed: either "-multipole" or "-sym"')
     end if
     
     ! check for the presence of required arguments
