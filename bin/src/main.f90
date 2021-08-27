@@ -138,6 +138,8 @@ real(rp), dimension(:,:,:), allocatable :: multipole_solutions         ! stores 
 real(rp), dimension(:), allocatable :: mapsol                          ! temporary charge array
 real(rp), dimension(:,:,:), allocatable :: sym_multipole_solutions     ! stores charge positions for the multipole fits with symmetry constraints (num_charges_max_multipole*4,num_charges_max_multipole,Natom)
 real(rp), dimension(:,:), allocatable   :: multipole_solutions_rmse    ! stores RMSE of the multipole solutions (needed for greedy mode)
+integer, dimension(:,:), allocatable    :: num_sym_solution_ops                        ! stores number of symmetry ops for best fit to each number of atomic charges
+integer, dimension(:,:,:), allocatable  :: sym_solution_ops                          ! stores symmetry ops for best fit to each number of atomic charges
 real(rp), dimension(:), allocatable :: multipole_best, multipole_save  ! current best charge fit in the multipole fit
 !real(rp), dimension(:,:,:), allocatable, save :: symmetry_ops          ! stores the symmetry operations in matrix form
 
@@ -149,10 +151,15 @@ logical,  dimension(:,:), allocatable :: usedXY, usedXZ, usedYZ        ! is the 
 ! fitting variables
 integer ::  natmfit = 0                               ! defines number of atoms included in fit
 integer,  dimension(:),   allocatable :: fitatoms     ! contains list of atom indices to be fitted
+integer :: fitAtm   ! contains atom currently being fitted to multipolar ESP
+integer ::  num_symFitAtms = 0                        ! defines number of symmetry-unique atoms included in symmetry-constratined fit
+integer,  dimension(:),   allocatable :: symFitAtms   ! contains list of symmetry-unique atom indices to be fitted in symmetry-constrained fit
 real(rp), dimension(:),   allocatable :: charges      ! contains position (x,y,z) and magnitude (q) of charges
                                                       ! x1: charge(1), y1: charge(2), z1: charge(3), q1: charge(4)
                                                       ! x2: charge(5), ...
+real(rp), dimension(:),   allocatable :: sym_charges  ! contains fitted parameters (distances along axes or in symmetry planes) for symmetry-constrained fits
 real(rp), dimension(:),   allocatable :: bestcharges  ! best solution found so far
+integer, dimension(:), allocatable   :: best_symatm_combo ! num chgs per atom for best symmetric charge guess
 real(rp), dimension(:,:), allocatable :: search_range ! has a minimum and a maximum value for every entry of charges
 
 
@@ -162,7 +169,7 @@ logical :: file_exists
 
 integer :: i,j,k,a,a1,a2,b,try,qdim,sqdim,flag,lcheck !current dimensionality of charge
 
-real(rp) :: tmp, RMSE_best, RMSE_tmp, MAE_tmp, maxAE_tmp
+real(rp) :: tmp, RMSE_best, RMSE_tmp, MAE_tmp, maxAE_tmp, lrmse_best
 
 
 call system("mkdir -p slices")
@@ -405,13 +412,20 @@ end if
 if(use_greedy_fit) then
 
     if(use_symmetry) then 
+      if(.not.allocated(symFitAtms)) allocate(symFitAtms(Natom))
       ! first remove atoms that are redundant due to symmetry
-      do b = 1,natmfit
+      b=1
+      do while (b.le.natmfit)
         a = fitatoms(b)
         flag=0
         do i=1,Natom 
           if(count(atom_sea(i,:) /= 0) == 0) exit
-          if(a.eq.atom_sea(i,1)) flag=1
+          if(a.eq.atom_sea(i,1)) then
+            flag=1
+            num_symFitAtms=num_symFitAtms+1
+            symFitAtms(num_symFitAtms)=i
+            b=b+1
+          endif
         end do
         if(flag.eq.0)then
           if(verbose) then
@@ -428,14 +442,14 @@ if(use_greedy_fit) then
       ! nuclear coordinates untouched as these need to be applied to charges
       ! during the fit
 !      if(.not.allocated(num_sym_ops)) allocate(num_sym_ops(Natom))
-      do b = 1,natmfit
-        a = fitatoms(b)
+      do b = 1,num_symFitAtms
+        a = symFitAtms(b)
         i=getChargeOps(a)
       enddo ! b
       ! now initialize how many charges are spawned by each of these sym ops
       ! for charges placed along rotational axes, in mirror planes etc.
-      do b = 1,natmfit
-        a = fitatoms(b)
+      do b = 1,num_symFitAtms
+        a = symFitAtms(b)
         call get_chgs_spawned(a)
       enddo ! b
 
@@ -474,6 +488,7 @@ if(use_greedy_fit) then
     !loop over the individual atoms selected for fitting (all atoms by default)
     do b = 1,natmfit
         a = fitatoms(b)
+        fitAtm = a
         !calculate the total charge of this multipole
         total_charge = multipole(a)
         
@@ -492,12 +507,17 @@ if(use_greedy_fit) then
         end do
         multipole_solutions_rmse(0,a) = sqrt(multipole_solutions_rmse(0,a)/Ngridr)
 
-        do num_charges = num_charges_min_multipole,num_charges_max_multipole
+        outer: do num_charges = num_charges_min_multipole,num_charges_max_multipole
             !current dimensionality
             qdim = 4*num_charges-1
         
             !check whether a fit exists already, if yes, we do nothing
             if(use_symmetry)then !read existing symmetry-constrained parameters
+              if(.not.allocated(sym_solution_ops)) then
+                allocate(num_sym_solution_ops(num_charges_max_multipole,Natom))
+                allocate(sym_solution_ops(num_charges_max_multipole,Natom,&
+                         num_charges_max_multipole))
+              endif
               write(dummystring,'(I0)') a
               write(dummystring2,'(I0)') num_charges
               if(trim(prefix) /= '') then
@@ -506,11 +526,12 @@ if(use_greedy_fit) then
                   dummystring = "symatm"//trim(dummystring)//"_"//trim(dummystring2)//"charges.fit"
               end if
               
-              file_exists=read_sym_file(dummystring,multipole_solutions(:,num_charges,a),&
-                  sqdim,num_charges,a,num_charges_max_multipole)
+              file_exists=read_sym_file(dummystring, &
+                  multipole_solutions(:,num_charges,a),sym_solution_ops,&
+                  num_sym_solution_ops,sqdim,num_charges,a,num_charges_max_multipole)
               if(file_exists)then
                 !calculate the RMSE of the loaded solution
-                multipole_solutions_rmse(num_charges,a) = sym_rmse_qtot( &
+                multipole_solutions_rmse(num_charges,a) = sym_atm_rmse_qtot( &
                                   multipole_solutions(1:sqdim,num_charges,a))
                 !print*, multipole_solutions_rmse(num_charges,a)
                 if(verbose) then
@@ -581,8 +602,11 @@ if(use_greedy_fit) then
                 if(use_symmetry)then
                   ! (re)initialize symmetry-constrained search
                   call DE_exit()
-                  if(.not.init_sym_search(num_charges,a)) cycle !skip if no fit exists with this combination of number of charges and symmetry constraints
-                  call init_sym_search_range(search_range,a,max_extend,max_charge,sqdim)
+                  if(.not.init_atm_sym_search(num_charges,a)) then
+                    cycle outer !skip if no fit exists with this combination of number of charges and symmetry constraints
+                  endif
+                  call init_sym_search_range(search_range,symFitAtms,num_symFitAtms,&
+                       max_extend,max_charge,sqdim)
     
                   call DE_init(set_range            = search_range(:,1:sqdim), &
                                set_popSize          = 10*sqdim,                &
@@ -593,12 +617,12 @@ if(use_greedy_fit) then
                                set_mutationStrategy = DEtargettobest1,         &
                                set_verbose          = verbose,                 &
                                set_Nprint           = 100)
-                  call DE_optimize(sym_rmse_qtot,sym_feasible,sym_sum_constr,&
+                  call DE_optimize(sym_atm_rmse_qtot,sym_atm_feasible,sym_sum_atm_constr,&
                         sym_multipole_solutions(1:sqdim,num_charges,a),&
                         init_pop=sym_init_pop_multipole)
                   call spawn_sym_chgs(sym_multipole_solutions(1:sqdim,num_charges,a),&
                         multipole_solutions(1:qdim,num_charges,a),&
-                        num_charges,a,total_charge)
+                        num_charges,symFitAtms,num_symFitAtms,total_charge,.false.)
                 else
                   call DE_optimize(rmse_qtot,feasible,sum_constr,&
                         multipole_solutions(1:qdim,num_charges,a),init_pop=init_pop_multipole)
@@ -698,7 +722,7 @@ flush(6)
             
             ! clean up
             call DE_exit()                        
-        end do        
+        end do outer
     end do   
 
     !load back the full grid
@@ -743,7 +767,7 @@ call read_multipole_file(input_multipolefile)
 !if atoms are excluded from the fit then fit to multipolar ESP of remaining
 !atoms
 
-if(natmfit < Natom) then ! some atoms are excluded
+if(natmfit < Natom.and..not.use_symmetry) then ! some atoms are excluded
   write(*,'(A)') 'Fragment fit detected'
   write(*,'(A)') 'Fitting to MTP grid, discarding reference MEP cube data'
   write(*,'(A)') 'Subsequent stats etc. are compared to MTP data, not the'
@@ -757,6 +781,13 @@ if(natmfit < Natom) then ! some atoms are excluded
     a=fitatoms(b)
     call add_atom_multipole_ESP_to_grid(multipole,a)
   enddo
+  !subtract charge from atomic multipoles of atoms that are not being fitted from total
+  !charge of molecule (to allow fitting of fragments)
+  do b=1, natmfit
+    a=fitatoms(b)
+    total_charge=total_charge + multipole(a)
+  enddo
+  if(verbose) write(*,'(A,ES23.9)') "Total fragment charge (a.u.): ",total_charge
 endif
 
 !refining the solution
@@ -884,10 +915,12 @@ end if
 ! allocate memory
 allocate(charges(4*num_charges_max-1), bestcharges(4*num_charges_max-1), search_range(2,4*num_charges_max-1), stat=ios)
 if(ios /= 0) call throw_error('Could not allocate memory.')
+if(use_symmetry) allocate(sym_charges(4*num_charges_max-1)) !max. possible size
 
 !other fits are not meaningful for now
+!check that the requested number of charges is possible with the atom fits available:
 if(num_charges_min < 2)       num_charges_min = 2
-if(num_charges_max > num_charges_max_multipole*natmfit) then
+if(.not.use_symmetry.and.num_charges_max > num_charges_max_multipole*natmfit) then
   write(*,*)
   write(*,*) 'WARNING:'
   write(*,'(A,I4,A,I4,A,I4,A)') "Can't create model with ",num_charges_max, &
@@ -904,15 +937,6 @@ if(num_charges_max > num_charges_max_multipole*natmfit) then
   num_charges_max = num_charges_max_multipole*natmfit
   write(*,*)
 endif
-
-!subtract charge from atomic multipoles of atoms that are not being fitted from total
-!charge of molecule (to allow fitting of fragments)
-
-do b=1, natmfit
-  a=fitatoms(b)
-  total_charge=total_charge + multipole(a)
-enddo
-if(verbose) write(*,'(A,ES23.9)') "Total fragment charge (a.u.): ",total_charge
 
 ! start fit for full molecule (or fragment defined by -atom flag)
 do num_charges = num_charges_min,num_charges_max
@@ -944,28 +968,57 @@ do num_charges = num_charges_min,num_charges_max
         read(30,*) dummystring, MAE_tmp
         read(30,*) dummystring, dummystring2, maxAE_tmp
         close(30)
-    else
-        RMSE_best = vbig
-    end if
+    endif
+    RMSE_best = vbig ! reset RMSE
 
     ! initialize search_range
-    call init_search_range()
-    call DE_init(set_range            = search_range(:,1:qdim), &
-                 set_popSize          = 10*qdim,                &
-                 set_maxGens          = 2000*num_charges,       &
-                 set_crossProb        = 1.00_rp,                &
-                 set_maxChilds        = 1,                      &
-                 set_forceRange       = .false.,                &
-                 set_mutationStrategy = DEtargettobest1,        &
-                 set_verbose          = verbose,                &
-                 set_Nprint           = 100)  
+    if(.not.use_symmetry)then
+      if(allocated(search_range)) deallocate(search_range)
+      allocate(search_range(2,4*num_charges))
+      call init_search_range()
+      call DE_init(set_range            = search_range(:,1:qdim), &
+                     set_popSize          = 10*qdim,                &
+                     set_maxGens          = 2000*num_charges,       &
+                     set_crossProb        = 1.00_rp,                &
+                     set_maxChilds        = 1,                      &
+                     set_forceRange       = .false.,                &
+                     set_mutationStrategy = DEtargettobest1,        &
+                     set_verbose          = verbose,                &
+                     set_Nprint           = 100)  
+    endif
     do try = 1,num_trials
         if(verbose) write(*,'(A,I0,A,I0)') "Starting fitting procedure for ",num_charges," charges, trial ",try
-        if(use_greedy_fit) then
-            call DE_optimize(rmse_qtot,feasible,sum_constr,charges(1:qdim),init_pop=init_pop_greedy)
+        if(use_symmetry)then
+          ! symmetry-constrained search
+          call DE_exit()
+          if(allocated(search_range)) deallocate(search_range)
+          allocate(search_range(2,4*num_charges))
+          if(.not.init_sym_search(num_charges)) then
+             cycle !skip if no fit exists with this combination of number of charges and symmetry constraints
+          endif
+          call init_sym_search_range(search_range,symFitAtms,num_symFitAtms,&
+                           max_extend,max_charge,sqdim)
+          call DE_init(set_range            = search_range(:,1:sqdim), &
+                       set_popSize          = 10*sqdim,                &
+                       set_maxGens          = 2000*num_charges,        &
+                       set_crossProb        = 1.00_rp,                 &
+                       set_maxChilds        = 1,                       &
+                       set_forceRange       = .false.,                 &
+                       set_mutationStrategy = DEtargettobest1,         &
+                       set_verbose          = verbose,                 &
+                       set_Nprint           = 100)
+          call DE_optimize(sym_rmse_qtot,sym_feasible,sym_sum_constr,&
+                sym_charges(1:sqdim),init_pop=sym_init_pop)
+          call spawn_sym_chgs(sym_charges(1:sqdim),&
+                charges,&
+                num_charges,symFitAtms,num_symFitAtms,total_charge,.true.)
         else
-            call DE_optimize(rmse_qtot,feasible,sum_constr,charges(1:qdim),init_pop=init_pop)
-        end if
+          if(use_greedy_fit) then
+              call DE_optimize(rmse_qtot,feasible,sum_constr,charges(1:qdim),init_pop=init_pop_greedy)
+          else
+              call DE_optimize(rmse_qtot,feasible,sum_constr,charges(1:qdim),init_pop=init_pop)
+          end if
+        endif
         ! measure the quality of the fit
         RMSE_tmp = rmse_qtot(charges(1:qdim)) 
         if(verbose) write(*,'(A,ES23.9,A)') "RMSE ", RMSE_tmp, " Hartree"
@@ -1018,6 +1071,7 @@ do num_charges = num_charges_min,num_charges_max
     ! clean up
     call DE_exit()
 end do
+stop
 call dealloc()
 
 contains
@@ -1037,6 +1091,24 @@ real(rp) function sum_constr_multipole(m)
 end function sum_constr_multipole
 !-------------------------------------------------------------------------------
 
+
+!-------------------------------------------------------------------------------
+! checks feasibility of fitting solution with symmetry constraints for atom fits
+logical function sym_atm_feasible(sq)
+    implicit none
+    real(rp), dimension(:) :: sq ! input charges
+    real(rp), dimension(num_charges*4) :: q   ! complete charges
+    real(rp) :: qsum
+    qsum = 0._rp
+
+    !if one atom meets constraints, so must all its sea's, so we don't need to check
+    call spawn_sym_chgs(sq,q,num_charges,symFitAtms,num_symFitAtms,total_charge,.false.) ! apply sym ops to sqin to populate q
+
+    sym_atm_feasible = feasible(q)
+end function sym_atm_feasible
+!-------------------------------------------------------------------------------
+
+
 !-------------------------------------------------------------------------------
 ! checks feasibility of fitting solution with symmetry constraints
 logical function sym_feasible(sq)
@@ -1044,13 +1116,10 @@ logical function sym_feasible(sq)
     real(rp), dimension(:) :: sq ! input charges
     real(rp), dimension(num_charges*4) :: q   ! complete charges
     real(rp) :: qsum
-    integer :: a,b
     qsum = 0._rp
 
-    do b = 1,natmfit
-      a = fitatoms(b)
-      call spawn_sym_chgs(sq,q,num_charges,a,total_charge) ! apply sym ops to sqin to populate q
-    enddo
+    !if one atom meets constraints, so must all its sea's, so we don't need to check
+    call spawn_sym_chgs(sq,q,num_charges,symFitAtms,num_symFitAtms,total_charge,.true.) ! apply sym ops to sqin to populate q
 
     sym_feasible = feasible(q)
 end function sym_feasible
@@ -1072,7 +1141,7 @@ logical function feasible(q)
         if(i+3 <= size(q,dim=1)) then
             if(abs(q(i+3)) >  max_charge_magnitude) then
                 feasible = .false.
-!                print*,'feasible: charge ',i/4,i,' too large: ',abs(q(i+3))
+                !print*,'feasible: charge ',i/4,i,' too large: ',abs(q(i+3))
                 return
             end if
             qtot = qtot + q(i+3)
@@ -1080,7 +1149,7 @@ logical function feasible(q)
             qtot = total_charge - qtot
             if(abs(qtot) >  max_charge_magnitude) then
                 feasible = .false.
-!                print*,'feasible: final charge too large: ',abs(qtot)
+                !print*,'feasible: final charge too large: ',abs(qtot)
                 return
             end if
         end if
@@ -1088,16 +1157,27 @@ logical function feasible(q)
     
         !find atom with minimal relative distance to atom included in fit
         rmin = vbig
-        do b = 1,natmfit
-            a = fitatoms(b)
-            r = sqrt(sum((atom_pos(:,a)-q(i:i+2))**2))/(vdW_scaling*vdW_radius(atom_num(a)))
-            !print*, atom_num(a), vdW_radius(atom_num(a))*bohr2angstrom
-            if(r < rmin) rmin = r
-        end do
+        if(use_symmetry) then
+          do a = 1,Natom
+              r = sqrt(sum((atom_pos(:,a)-q(i:i+2))**2))/(vdW_scaling*vdW_radius(atom_num(a)))
+              !print*, atom_num(a), vdW_radius(atom_num(a))*bohr2angstrom
+              if(r < rmin) rmin = r
+          end do
+        else
+          do b = 1,natmfit
+              a = fitatoms(b)
+              r = sqrt(sum((atom_pos(:,a)-q(i:i+2))**2))/(vdW_scaling*vdW_radius(atom_num(a)))
+              !print*, atom_num(a), vdW_radius(atom_num(a))*bohr2angstrom
+              if(r < rmin) rmin = r
+          end do
+        endif
         if(rmin > 1._rp) then !this means that rmin is larger than the vdW radius
                 feasible = .false.
-!                print*,'feasible: charge ',(i+3)/4,i,' outside spatial bounds ',rmin
-                !print*, r
+                !print*,'feasible: charge ',(i+3)/4,i,' outside spatial bounds ',rmin
+!do b=1,size(q,dim=1),4
+!     print*, 'H ',q(b:b+3)
+!enddo
+!print*,''
                 return
         end if
     end do
@@ -1186,18 +1266,29 @@ end function feasible
 
 
 !-------------------------------------------------------------------------------
+real(rp) function sym_sum_atm_constr(sq)
+    implicit none
+    real(rp), dimension(:) :: sq ! input charges
+    real(rp), dimension(num_charges*4) :: q   ! complete charges
+    real(rp) :: qsum
+    qsum = 0._rp
+
+    call spawn_sym_chgs(sq,q,num_charges,symFitAtms,num_symFitAtms,total_charge,.false.) ! apply sym ops to sqin to populate q
+
+    sym_sum_atm_constr = sum_constr(q)
+end function sym_sum_atm_constr
+!-------------------------------------------------------------------------------
+
+
+!-------------------------------------------------------------------------------
 real(rp) function sym_sum_constr(sq)
     implicit none
     real(rp), dimension(:) :: sq ! input charges
     real(rp), dimension(num_charges*4) :: q   ! complete charges
     real(rp) :: qsum
-    integer :: a,b
     qsum = 0._rp
 
-    do b = 1,natmfit
-      a = fitatoms(b)
-      call spawn_sym_chgs(sq,q,num_charges,a,total_charge) ! apply sym ops to sqin to populate q
-    enddo
+    call spawn_sym_chgs(sq,q,num_charges,symFitAtms,num_symFitAtms,total_charge,.true.) ! apply sym ops to sqin to populate q
 
     sym_sum_constr = sum_constr(q)
 end function sym_sum_constr
@@ -1259,21 +1350,38 @@ end function rmse_qtot
 ! charges (this means that the total charge must add up to a specific value) and 
 ! applyng symmetry operations to spawn additional charges until symmetry constraints
 ! are satisfied (i.e. charge arrangement possesses same symmetry as parent molecule)
-real(8) function sym_rmse_qtot(sqin)
+real(rp) function sym_rmse_qtot(sqin)
     implicit none
     real(rp), dimension(:) :: sqin ! input charges
     real(rp), dimension(num_charges*4) :: q   ! complete charges
     real(rp) :: qsum
-    integer :: a,b
     qsum = 0._rp
 
-    do b = 1,natmfit
-      a = fitatoms(b)
-      call spawn_sym_chgs(sqin,q,num_charges,a,total_charge) ! apply sym ops to sqin to populate q
-    enddo
+    call spawn_sym_chgs(sqin,q,num_charges,symFitAtms,num_symFitAtms,total_charge,.true.) ! apply sym ops to sqin to populate q
 
     sym_rmse_qtot = rmse(q)
 end function sym_rmse_qtot
+!-------------------------------------------------------------------------------
+
+
+!-------------------------------------------------------------------------------
+! computes root mean squared error of a given atom fit to the true esp, using constraint
+! charges (this means that the total charge must add up to a specific value) and 
+! applyng symmetry operations to spawn additional charges until symmetry constraints
+! are satisfied (i.e. charge arrangement possesses same symmetry as parent molecule)
+real(rp) function sym_atm_rmse_qtot(sqin)
+    implicit none
+    real(rp), dimension(:) :: sqin ! input charges
+    real(rp), dimension(num_charges*4) :: q   ! complete charges
+    real(rp) :: qsum
+    integer,dimension(1) :: atms
+    qsum = 0._rp
+
+    atms(1)=fitAtm
+    call spawn_sym_chgs(sqin,q,num_charges,atms,1,total_charge,.false.) ! apply sym ops to sqin to populate q
+
+    sym_atm_rmse_qtot = rmse(q)
+end function sym_atm_rmse_qtot
 !-------------------------------------------------------------------------------
 
 
@@ -1869,12 +1977,129 @@ subroutine sym_init_pop_multipole(pop)
 
     ! loop over population
     do p = 1,popSize
-      call sym_init_pars(pop(:,p),a,multipole(a),vdW_scaling,&
-           vdW_radius(atom_num(a)))
+      call sym_init_pars(pop(:,p),symFitAtms,num_symFitAtms,multipole,vdW_scaling,&
+           vdW_radius)
     end do
 end subroutine sym_init_pop_multipole
 !-------------------------------------------------------------------------------
 
+
+!-------------------------------------------------------------------------------
+! initializes the population to only feasible symmetry solutions
+subroutine sym_init_pop(pop)
+    implicit none
+    real(rp), dimension(:,:), intent(out) :: pop
+    integer  :: popSize, p
+
+    popSize = size(pop,dim=2)
+
+    ! loop over population
+    do p = 1,popSize
+      call sym_init_pars(pop(:,p),symFitAtms,num_symFitAtms,multipole,vdW_scaling,&
+           vdW_radius)
+    end do
+end subroutine sym_init_pop
+!-------------------------------------------------------------------------------
+
+
+!-------------------------------------------------------------------------------
+! initializes the search parameters to only feasible symmetry-constrianed solutions
+function init_sym_search(num_charges)
+    implicit none
+    integer :: num_charges !number of charges to fit for molecule / fragment
+    logical :: init_sym_search
+    integer :: i,nchg,nchg_tot
+    integer, dimension(Natom) :: num_seas
+    integer,dimension(num_symFitAtms) :: combo
+    real(rp) :: rmse_tot
+
+    init_sym_search=.false.
+    nchg=0
+    if(allocated(best_symatm_combo)) deallocate(best_symatm_combo)
+    allocate(best_symatm_combo(num_symFitAtms))
+    
+    !find how many sea's each symmetry-unique atom has
+    do i=1,Natom ! loop over sea sets
+      if(count(atom_sea(i,:) /= 0) == 0) exit
+      num_seas(atom_sea(i,1))=count(atom_sea(i,:) /= 0)
+    enddo
+    !find permutation of charges for symmetry-unique atoms with fewer than num_charges
+    !charges in total and lowest estimated RMSE
+    lrmse_best=vbig
+    best_symatm_combo=combo
+    rmse_tot=0.d0
+    nchg_tot=0
+    combo(1:num_symFitAtms)=1
+    call sym_permutate_rmse(1,rmse_tot,nchg_tot,num_charges,num_seas,combo)
+    if(lrmse_best.lt.vbig) then
+      init_sym_search=.true.
+      write(*,'(/,A,I0,A)') 'Best initial guess with ',num_charges,' charges found for:'
+      do i=1,num_symFitAtms
+        write(*,'(2(A,I0),A)') 'Atom ',symFitAtms(i),' with ',best_symatm_combo(i),&
+          ' charges'
+      enddo
+    else
+      write(*,'(/,A,I0,A,/)') 'No suitable solution found with ',num_charges,' charges'
+      stop
+    endif
+    !now we chose a set of fitting operations, initialize arrays in symmetry routines
+    call sym_init_fit_ops(symFitAtms,num_symFitAtms,best_symatm_combo,num_charges,&
+             sym_solution_ops,num_sym_solution_ops)
+end function init_sym_search
+
+!-------------------------------------------------------------------------------
+!find permutation of atomic solutions with up to maxchg charges that provides
+!lowest RMSE. Solutions with under maxchg charges are allowed as many charge
+!numbers aren't possible within symmetry constraints
+recursive subroutine sym_permutate_rmse(N,rmse_tot,nchg_tot,nChgFit,num_seas,combo)
+implicit none
+integer  :: N,i,nchg_tot,lnchg_tot,nChgFit,atm
+integer, dimension(:) :: num_seas
+integer,dimension(num_symFitAtms) :: combo
+real(8)  :: rmse_tot,lrmse_tot
+
+! for each atom in symFitAtms
+atm=symFitAtms(N)
+lrmse_tot=rmse_tot
+lnchg_tot=nchg_tot
+
+! start with case where we have zero charges for this atom
+if(lnchg_tot.le.nChgFit)then
+  combo(N)=0
+  lrmse_tot=rmse_tot+multipole_solutions_rmse(0,atm)*num_seas(atm)
+  if(N<num_symFitAtms) then
+    call sym_permutate_rmse(N+1,lrmse_tot,lnchg_tot,nChgFit,num_seas,combo)
+  else !reached last atom in fit
+    if(lrmse_tot.lt.lrmse_best.and.lnchg_tot.eq.nChgFit) then
+      lrmse_best=lrmse_tot
+      best_symatm_combo(:)=combo(:)
+    endif
+  endif
+endif
+! loop over best fitting results for each number of charges of this atom
+do i=num_charges_min_multipole,num_charges_max_multipole
+  ! add total number of charges spawned by this atom across all sea's
+  lnchg_tot=nchg_tot+i*num_seas(atm)
+  ! track which solutions we currently test
+  combo(N)=i
+  ! if total number of chgs is less than molecular target:
+  if(lnchg_tot.le.nChgFit)then
+    !check there was actually a solution for this many charges:
+    if(multipole_solutions_rmse(i,atm).ne.vbig)then
+      lrmse_tot=rmse_tot+multipole_solutions_rmse(i,atm)*num_seas(atm)
+      if(N<num_symFitAtms) then
+        call sym_permutate_rmse(N+1,lrmse_tot,lnchg_tot,nChgFit,num_seas,combo)
+      else !reached last atom in fit
+        if(lrmse_tot.lt.lrmse_best.and.lnchg_tot.eq.nChgFit) then
+          lrmse_best=lrmse_tot
+          best_symatm_combo(:)=combo(:)
+        endif
+      endif
+    endif
+  endif
+end do
+
+end subroutine sym_permutate_rmse
 
 !-------------------------------------------------------------------------------
 subroutine read_multipole_file(inpfile)
@@ -1903,7 +2128,20 @@ close(30)
 
 
 end subroutine read_multipole_file
+
 !-------------------------------------------------------------------------------
+!recursive subroutine permutate(E, P)
+!implicit none
+!integer, intent(in)  :: E(:)       ! array of objects
+!integer, intent(out) :: P(:,:)     ! permutations of E
+!integer  :: N, Nfac, i, k, S(size(P,1)/size(E), size(E)-1)
+!N = size(E); Nfac = size(P,1);
+!do i=1,N                           ! cases with E(i) in front
+!  if( N>1 ) call permutate((/E(:i-1), E(i+1:)/), S)
+!  forall(k=1:Nfac/N) P((i-1)*Nfac/N+k,:) = (/E(i), S(k,:)/)
+!end do
+!end subroutine permutate
+
 
 !-------------------------------------------------------------------------------
 subroutine read_xyz_file()

@@ -11,8 +11,9 @@ private
 public :: symmetry_init, equal, isSymmetryOperation, asymmetryMagnitude, centerOfMass
 public :: symmetryOperation, getShiftedPos, getChargeOps, chgsSpawned
 public :: rotax_to_cartesian, refplane_to_cartesian, get_atm_sym_op, point_to_cartesian
-public :: init_sym_search, init_sym_search_range, get_chgs_spawned, spawn_sym_chgs
+public :: init_sym_search_range, get_chgs_spawned, spawn_sym_chgs
 public :: getNumSymOps, sym_init_pars, read_sym_file, write_sym_file, sym_map_sea_q_coords
+public :: init_atm_sym_search, sym_init_fit_ops
           !calc_eigenvalues, calc_eigenvectors, rotation !only for test reasons public
           
 !type definition of symmetry operations
@@ -258,7 +259,7 @@ subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
         tmp_sym_op%typ = "rot"
         tmp_sym_op%M     = rotation(axis,n=2)
         tmp_sym_op%axis  = axis
-        tmp_sym_op%n     = 2
+        tmp_sym_op%n     = 1
         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
             call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
             !also check the reflection
@@ -689,7 +690,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         axis = crossProduct(axis,v1)
         tmp_sym_op%M = rotation(axis, n = 2)
         tmp_sym_op%axis  = axis
-        tmp_sym_op%n     = 2
+        tmp_sym_op%n     = 1
         tmp_sym_op%typ = "rot"
         write(tmp_sym_op%label,'(A)') "C2"
         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
@@ -718,7 +719,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
             if(.not.equal(sum((atom_pos(set(1),:)-atom_pos(set(2),:))*axis),0d0)) cycle !axis is not perpendicular
             tmp_sym_op%M = rotation(axis, n = 2)
             tmp_sym_op%axis  = axis
-            tmp_sym_op%n     = 2
+            tmp_sym_op%n     = 1
             tmp_sym_op%typ = "rot"
             write(tmp_sym_op%label,'(A)') "C2"
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
@@ -746,7 +747,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         !check the Ck rotation
         tmp_sym_op%M  = rotation(axis, n = k)
         tmp_sym_op%axis  = axis
-        tmp_sym_op%n     = k
+        tmp_sym_op%n     = k-1
         tmp_sym_op%typ = "rot"
         write(tmp_sym_op%label,'(A,I0)') "C",k
         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M )) then
@@ -771,7 +772,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         do i = 2,k/2
             tmp_sym_op%M = rotation(axis, n = i)
             tmp_sym_op%axis  = axis
-            tmp_sym_op%n     = i
+            tmp_sym_op%n     = i-1
             tmp_sym_op%typ = "rot"
             write(tmp_sym_op%label,'(A,I0)') "C",i
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
@@ -808,7 +809,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         do i = 2,k/2
             tmp_sym_op%M = rotation(axis, n = i)
             tmp_sym_op%axis  = axis
-            tmp_sym_op%n     = i
+            tmp_sym_op%n     = i-1
             tmp_sym_op%typ = "rot"
             write(tmp_sym_op%label,'(A,I0)') "C",i
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
@@ -846,7 +847,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
             do j = 2,k-1
                 tmp_sym_op%M = rotation(axis, n = j)  
                 tmp_sym_op%axis  = axis
-                tmp_sym_op%n     = j
+                tmp_sym_op%n     = j-1
                 tmp_sym_op%typ = "rot"
                 write(tmp_sym_op%label,'(A,I0)') "C",j
                 if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M )) then
@@ -875,7 +876,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
                 do l = 2,k-1
                     tmp_sym_op%M = rotation(axis, n = l)  
                     tmp_sym_op%axis  = axis
-                    tmp_sym_op%n     = l
+                    tmp_sym_op%n     = l-1
                     tmp_sym_op%typ = "rot"
                     write(tmp_sym_op%label,'(A,I0)') "C",l
                     if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M )) then
@@ -916,7 +917,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         do i = 2,k/2
             tmp_sym_op%M = rotation(axis, n = i)
             tmp_sym_op%axis  = axis
-            tmp_sym_op%n     = i
+            tmp_sym_op%n     = i-1
             tmp_sym_op%typ = "rot"
             write(tmp_sym_op%label,'(A,I0)') "C",i
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
@@ -945,7 +946,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
                     v1 = (pos(i,:)-pos(j,:))/sqrt(sum((pos(i,:)-pos(j,:))**2))
                     tmp_sym_op%M = rotation(v1, n = 2)
                     tmp_sym_op%axis  = v1
-                    tmp_sym_op%n     = 2
+                    tmp_sym_op%n     = 1
                     tmp_sym_op%typ = "rot"
                     write(tmp_sym_op%label,'(A)') "C2"
                     if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
@@ -975,7 +976,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         axis = v1
         tmp_sym_op%M  = rotation(axis, n = 2)
         tmp_sym_op%axis  = axis
-        tmp_sym_op%n     = 2
+        tmp_sym_op%n     = 1
         tmp_sym_op%typ = "rot"
         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
             call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
@@ -998,7 +999,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         axis = v2
         tmp_sym_op%M = rotation(axis, n = 2)
         tmp_sym_op%axis  = axis
-        tmp_sym_op%n     = 2
+        tmp_sym_op%n     = 1
         tmp_sym_op%typ = "rot"
         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
             call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
@@ -1021,7 +1022,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         axis = v3
         tmp_sym_op%M = rotation(axis, n = 2)
         tmp_sym_op%axis  = axis
-        tmp_sym_op%n     = 2
+        tmp_sym_op%n     = 1
         tmp_sym_op%typ = "rot"
         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
             call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
@@ -1056,7 +1057,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
                     axis = v1/tmp
                     tmp_sym_op%M = rotation(axis, n = 2)
                     tmp_sym_op%axis  = axis
-                    tmp_sym_op%n     = 2
+                    tmp_sym_op%n     = 1
                     tmp_sym_op%typ = "rot"
                     if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
                         call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
@@ -1084,7 +1085,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
             axis = pos(i,:)/sqrt(sum(pos(i,:)**2))
             tmp_sym_op%M = rotation(axis, n = 2)
             tmp_sym_op%axis  = axis
-            tmp_sym_op%n     = 2
+            tmp_sym_op%n     = 1
             tmp_sym_op%typ = "rot"
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
                 call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
@@ -1686,18 +1687,18 @@ end subroutine get_chgs_spawned
 
 !-------------------------------------------------------------------------------
 ! selects symmetry axes and mirror planes to place charges for subsequent
-! symmetry-constrained fitting, using the total allowed number of charges for
+! symmetry-constrained atom fitting, using the total allowed number of charges for
 ! the atom as a constraint
-function init_sym_search(num_charges,a)
+function init_atm_sym_search(num_charges,a)
     implicit none
     integer :: num_charges,a
     integer, parameter :: maxtry=200
     integer :: i,cur_charges
     real(8) :: ran
-    logical :: init_sym_search
+    logical :: init_atm_sym_search
     integer, dimension(num_charges) :: num_chgs_per_fit_op ! temporary array
 
-    init_sym_search=.true.
+    init_atm_sym_search=.true.
 
     if(allocated(atm_fit_ops)) deallocate(atm_fit_ops)
     if(allocated(num_atm_fit_ops)) deallocate(num_atm_fit_ops)
@@ -1733,9 +1734,9 @@ function init_sym_search(num_charges,a)
     !otherwise throw error
     if(num_charges.ne.cur_charges)then
       write(*,'(/,A,I0,A,I0,/)') &
-          'init_sym_search: no solution found that provides ',&
+          'init_atm_sym_search: no solution found that provides ',&
           num_charges,' charges for atom ',a
-      init_sym_search=.false.
+      init_atm_sym_search=.false.
     else
       write(*,'(/,2(A,I0),A)') &
         'Fitting sym ops for atom ',a,' with ',num_charges,' charges: '
@@ -1746,70 +1747,79 @@ function init_sym_search(num_charges,a)
       write(*,'(/)')
     endif
 
-end function init_sym_search
+end function init_atm_sym_search
+
 
 !-------------------------------------------------------------------------------
-subroutine init_sym_search_range(search_range,a,max_extend,max_charge,sqdim)
+subroutine init_sym_search_range(search_range,symFitAtms,num_symFitAtms,&
+           max_extend,max_charge,sqdim)
     implicit none
-    integer :: n,i,a,sqdim
+    integer :: n,i,j,a,num_symFitAtms,sqdim
+    integer, dimension(:) :: symFitAtms
     real(8) :: max_extend,max_charge
     character(len=3) :: lab
     real(8), dimension(:,:) :: search_range ! has a minimum and a maximum value for every entry of fitting parameters
+    logical :: lasta
 
     n=1
-    do i=1,num_atm_fit_ops(a)
-      lab=allSymOps(atm_fit_ops(a,i))%typ
-      if(lab.eq.'rot'.or.lab.eq.'imp') then
-        search_range(1,n  ) = -max_extend
-        search_range(2,n  ) = max_extend
-        n=n+1
-        if(i<num_atm_fit_ops(a))then ! constrain last charge
-          search_range(1,n+1) = -max_charge
-          search_range(2,n+1) = max_charge
+    lasta=.false. ! is last atom?
+    do j=1,num_symFitAtms
+      a=symFitAtms(j)
+      if(j.eq.num_symFitAtms) lasta=.true. ! last atom
+      do i=1,num_atm_fit_ops(a)
+        lab=allSymOps(atm_fit_ops(a,i))%typ
+        if(lab.eq.'rot'.or.lab.eq.'imp') then
+          search_range(1,n  ) = -max_extend
+          search_range(2,n  ) = max_extend
           n=n+1
+          if(i<num_atm_fit_ops(a).or..not.lasta)then ! constrain last charge
+            search_range(1,n+1) = -max_charge
+            search_range(2,n+1) = max_charge
+            n=n+1
+          endif
+        elseif(lab.eq.'ref') then
+          search_range(1,n  ) = -max_extend
+          search_range(2,n  ) = max_extend
+          search_range(1,n+1) = -max_extend
+          search_range(2,n+1) = max_extend
+          n=n+2
+          if(i<num_atm_fit_ops(a).or..not.lasta)then ! constrain last charge
+            search_range(1,n+2) = -max_charge
+            search_range(2,n+2) = max_charge
+            n=n+1
+          endif
+        elseif(lab.eq.'inv') then
+          if(i<num_atm_fit_ops(a).or..not.lasta)then ! constrain last charge
+            search_range(1,n) = -max_charge
+            search_range(2,n) = max_charge
+            n=n+1
+          endif
+        elseif(lab.eq.'fre') then
+          search_range(1,n  ) = -max_extend
+          search_range(2,n  ) = max_extend
+          search_range(1,n+1) = -max_extend
+          search_range(2,n+1) = max_extend
+          search_range(1,n+2) = -max_extend
+          search_range(2,n+2) = max_extend
+          n=n+3
+          if(i<num_atm_fit_ops(a).or..not.lasta)then ! constrain last charge
+            search_range(1,n+3) = -max_charge
+            search_range(2,n+3) = max_charge
+            n=n+1
+          endif
+        elseif(lab.eq.'nuc') then
+          if(i<num_atm_fit_ops(a).or..not.lasta)then ! constrain last charge
+            search_range(1,n  ) = -max_charge
+            search_range(2,n  ) = max_charge
+            n=n+1
+          endif
+        else
+          write(*,'(/,3A,/)') 'ERROR: unrecognized operation type ',lab,&
+             ' in init_sym_search_range'
+          stop
         endif
-      elseif(lab.eq.'ref') then
-        search_range(1,n  ) = -max_extend
-        search_range(2,n  ) = max_extend
-        search_range(1,n+1) = -max_extend
-        search_range(2,n+1) = max_extend
-        n=n+2
-        if(i<num_atm_fit_ops(a))then ! constrain last charge
-          search_range(1,n+2) = -max_charge
-          search_range(2,n+2) = max_charge
-          n=n+1
-        endif
-      elseif(lab.eq.'inv') then
-        if(i<num_atm_fit_ops(a))then ! constrain last charge
-          search_range(1,n) = -max_charge
-          search_range(2,n) = max_charge
-          n=n+1
-        endif
-      elseif(lab.eq.'fre') then
-        search_range(1,n  ) = -max_extend
-        search_range(2,n  ) = max_extend
-        search_range(1,n+1) = -max_extend
-        search_range(2,n+1) = max_extend
-        search_range(1,n+2) = -max_extend
-        search_range(2,n+2) = max_extend
-        n=n+3
-        if(i<num_atm_fit_ops(a))then ! constrain last charge
-          search_range(1,n+3) = -max_charge
-          search_range(2,n+3) = max_charge
-          n=n+1
-        endif
-      elseif(lab.eq.'nuc') then
-        if(i<num_atm_fit_ops(a))then ! constrain last charge
-          search_range(1,n  ) = -max_charge
-          search_range(2,n  ) = max_charge
-          n=n+1
-        endif
-      else
-        write(*,'(/,3A,/)') 'ERROR: unrecognized operation type ',lab,&
-           ' in init_sym_search_range'
-        stop
-      endif
-    enddo
+      enddo !i
+    enddo !j
 
     sqdim=n-1
 
@@ -1817,111 +1827,156 @@ end subroutine init_sym_search_range
 
 !-------------------------------------------------------------------------------
 ! initializes the population to only feasible solutions
-subroutine sym_init_pars(pop,atm,qatm,scal,radius)
+subroutine sym_init_pars(pop,fitAtms,nFitAtms,qatm,scal,radius)
     implicit none
     real(8), dimension(:), intent(out) :: pop
     real(8), dimension(3) :: ranvec
-    real(8) :: ran, ranx, rany, qatm, scal, radius, f
-    integer  :: d,l,op,atm
+    real(8), dimension(:) :: radius, qatm
+    real(8) :: ran, ranx, rany, scal, f
+    integer, dimension(:) :: fitAtms
+    integer  :: i,d,l,op,atm,nFitAtms
+    logical :: lasta ! last atom?
 
-    l=1 ! index in atom symmetry operation array
+    l=1 ! index in pop parameter array
+    lasta=.false.
 
     ! loop over symmetry operations for this atom
-    do d = 1,num_atm_fit_ops(atm)
-      op=atm_fit_ops(atm,d)
-      if(allSymOps(op)%typ.eq.'rot'.or.allSymOps(op)%typ.eq.'imp')then
-        ! draw a random scaling factor and scale distance along axis
-        call random_number(ranx)
-        ranx=2.d0*(ranx-0.5d0)
-        ranx = ranx*scal*radius
-        ! set charge position
-        pop(l) = ranx
-        l=l+1
-
-        if(d.lt.num_atm_fit_ops(atm))then ! constrain last charge
-          ! set charge
-          call random_number(ran)
-          pop(l) = -abs(qatm) + 2*ran*abs(qatm)
+    do i=1,nFitAtms
+      atm=fitAtms(i)
+      if(i.eq.nFitAtms) lasta=.true. !last atom
+      do d = 1,num_atm_fit_ops(atm)
+        op=atm_fit_ops(atm,d)
+        if(allSymOps(op)%typ.eq.'rot'.or.allSymOps(op)%typ.eq.'imp')then
+          ! draw a random scaling factor and scale distance along axis
+          call random_number(ranx)
+          ranx=2.d0*(ranx-0.5d0)
+          ranx = ranx*scal*radius(atm)
+          ! set charge position
+          pop(l) = ranx
           l=l+1
-        endif
-      elseif(allSymOps(op)%typ.eq.'ref') then
-        ! draw a normalized random scaling vector in mirror plane
-        call random_number(ranx)
-        ranx=2.d0*(ranx-0.5d0)
-        call random_number(rany)
-        rany=2.d0*(rany-0.5d0)
-        f=sqrt(ranx**2+rany**2)
-        ranx=ranx/f
-        rany=rany/f
-
-        ! draw a random scaling factor and scale vector
-        call random_number(ran)
-        ranx=ran*scal*radius*ranx
-        rany=ran*scal*radius*rany
-
-        ! set charge position
-        pop(l) = ranx
-        pop(l+1) = rany
-        l=l+2
-
-        if(d.lt.num_atm_fit_ops(atm))then ! constrain last charge
-          ! set charge
+          if(d.lt.num_atm_fit_ops(atm).or..not.lasta)then ! constrain last charge
+            ! set charge
+            call random_number(ran)
+            pop(l) = -abs(qatm(atm)) + 2*ran*abs(qatm(atm))
+            l=l+1
+          endif
+        elseif(allSymOps(op)%typ.eq.'ref') then
+          ! draw a normalized random scaling vector in mirror plane
+          call random_number(ranx)
+          ranx=2.d0*(ranx-0.5d0)
+          call random_number(rany)
+          rany=2.d0*(rany-0.5d0)
+          f=sqrt(ranx**2+rany**2)
+          ranx=ranx/f
+          rany=rany/f
+  
+          ! draw a random scaling factor and scale vector
           call random_number(ran)
-          pop(l) = -abs(qatm) + 2*ran*abs(qatm)
-          l=l+1
-        endif
-      elseif(allSymOps(op)%typ.eq.'inv') then
-        if(d.lt.num_atm_fit_ops(atm))then ! constrain last charge
+          ranx=ran*scal*radius(atm)*ranx
+          rany=ran*scal*radius(atm)*rany
+  
+          ! set charge position
+          pop(l) = ranx
+          pop(l+1) = rany
+          l=l+2
+  
+          if(d.lt.num_atm_fit_ops(atm).or..not.lasta)then ! constrain last charge
+            ! set charge
+            call random_number(ran)
+            pop(l) = -abs(qatm(atm)) + 2*ran*abs(qatm(atm))
+            l=l+1
+          endif
+        elseif(allSymOps(op)%typ.eq.'inv') then
+          if(d.lt.num_atm_fit_ops(atm).or..not.lasta)then ! constrain last charge
+            call random_number(ran)
+            pop(l) = -abs(qatm(atm)) + 2*ran*abs(qatm(atm))
+            l=l+1
+          endif
+        elseif(allSymOps(op)%typ.eq.'nuc')then ! nuclear charge
+          if(d.lt.num_atm_fit_ops(atm).or..not.lasta)then ! constrain last charge
+            call random_number(ran)
+            pop(l) = -abs(qatm(atm)) + 2*ran*abs(qatm(atm))
+            l=l+1
+          endif
+        elseif(allSymOps(op)%typ.eq.'fre')then ! free point
+          ! draw a random vector and normalize (random direction)
+          call random_number(ranvec)
+          ranvec = ranvec - 0.5d0
+          ranvec = ranvec/sqrt(sum(ranvec**2))
+  
+          ! draw a random scaling factor and scale vector
           call random_number(ran)
-          pop(l) = -abs(qatm) + 2*ran*abs(qatm)
-          l=l+1
+          ranvec = ran*scal*radius(atm)*ranvec
+  
+          ! set charge position
+          pop(l:l+2) = ranvec
+          l=l+3
+  
+          if(d.lt.num_atm_fit_ops(atm).or..not.lasta)then ! constrain last charge
+            ! set charge
+            call random_number(ran)
+            pop(l) = -abs(qatm(atm)) + 2*ran*abs(qatm(atm))
+            l=l+1
+          endif
+        else
+          write(*,'(2A)') 'ERROR in sym_init_pars: unknown symmetry type: ',&
+             allSymOps(op)%typ
+          stop
         endif
-      elseif(allSymOps(op)%typ.eq.'nuc')then ! nuclear charge
-        if(d.lt.num_atm_fit_ops(atm))then ! constrain last charge
-          call random_number(ran)
-          pop(l) = -abs(qatm) + 2*ran*abs(qatm)
-          l=l+1
-        endif
-      elseif(allSymOps(op)%typ.eq.'fre')then ! free point
-        ! draw a random vector and normalize (random direction)
-        call random_number(ranvec)
-        ranvec = ranvec - 0.5d0
-        ranvec = ranvec/sqrt(sum(ranvec**2))
-
-        ! draw a random scaling factor and scale vector
-        call random_number(ran)
-        ranvec = ran*scal*radius*ranvec
-
-        ! set charge position
-        pop(l:l+2) = ranvec
-        l=l+3
-
-        if(d.lt.num_atm_fit_ops(atm))then ! constrain last charge
-          ! set charge
-          call random_number(ran)
-          pop(l) = -abs(qatm) + 2*ran*abs(qatm)
-          l=l+1
-        endif
-      else
-        write(*,'(2A)') 'ERROR in sym_init_pars: unknown symmetry type: ',&
-           allSymOps(op)%typ
-        stop
-      endif
-    end do
+      end do
+    enddo
 end subroutine sym_init_pars
+
+!-------------------------------------------------------------------------------
+! initialize atm_fit_ops() and num_atm_fit_ops() for the combination of symmetry
+! operations that was found to give the best initial guess for the current total
+! number of charges
+subroutine sym_init_fit_ops(symFitAtms,num_symFitAtms,best_symatm_combo,num_charges,&
+                            sym_solution_ops,num_sym_solution_ops)
+    implicit none
+    integer, dimension(:) :: symFitAtms,best_symatm_combo
+    integer, dimension(:,:) :: num_sym_solution_ops
+    integer, dimension(:,:,:) :: sym_solution_ops
+    integer :: num_symFitAtms,num_charges,i,atm,nchg
+
+    if(allocated(num_atm_fit_ops)) deallocate(num_atm_fit_ops)
+    if(allocated(atm_fit_ops)) deallocate(atm_fit_ops)
+    allocate(num_atm_fit_ops(num_symFitAtms))
+    allocate(atm_fit_ops(num_symFitAtms,num_charges))
+
+    do i=1,num_symFitAtms
+      atm=symFitAtms(i)
+      nchg=best_symatm_combo(i)
+      if(nchg.eq.0)then
+        num_atm_fit_ops(atm)=0
+      else
+        num_atm_fit_ops(atm)=num_sym_solution_ops(nchg,i)
+        atm_fit_ops(atm,1:num_atm_fit_ops(atm))=&
+                         sym_solution_ops(nchg,i,1:num_atm_fit_ops(atm))
+      endif
+    enddo
+
+end subroutine sym_init_fit_ops
+
 
 !-------------------------------------------------------------------------------
 ! applies sym ops to sqin (local sym axis, mirror plane etc. coordinates) to
 ! populate a new Cartesian array q of all coorindates after applying sym ops
-subroutine spawn_sym_chgs(sqin,q,nq,atm,total_charge)
+subroutine spawn_sym_chgs(sqin,q,nq,symFitAtms,num_symFitAtms,total_charge,&
+               replicate_atoms)
     implicit none
-    integer :: atm,nq,npts
+    integer :: atm,atm1,atm2,nq,npts,num_symFitAtms
+    integer, dimension(:) :: symFitAtms
     real(8), dimension(:) :: sqin ! input charges
-    integer :: i,j,l,n,op,nlast
+    integer, dimension(num_symFitAtms) :: num_atm_chgs,n1
+    integer, dimension(nq) :: corr_chgs ! hold q() indices of charges to correct in order to maintain total charge
+    integer :: a,b,i,j,k,l,n,op,nlast,tlast,nn
+    logical :: replicate_atoms !whether to replicate charges to other sea's
     real(8) :: chg,chg_corr,total_charge,local_charge
     real(8), dimension(size(sqin,dim=1)+1) :: tqin    ! sqin with additional empty charge
-    real(8), dimension(nq*4) :: q    ! output: spawned charge array in global axis
-    real(8), dimension(3) :: pt
+    real(8), dimension(nq*4) :: tq    ! output: spawned charge array in global axis
+    real(8), dimension(:) :: q    ! output: spawned charge array in global axis
+    real(8), dimension(3) :: pt,tpos
     real(8), dimension(nq,3) :: sym_pts ! hold points generated by sym ops
 
     tqin(1:size(sqin,dim=1))=sqin(:)
@@ -1930,76 +1985,121 @@ subroutine spawn_sym_chgs(sqin,q,nq,atm,total_charge)
     n=0 ! no. chgs spawned
     l=1 ! current index in sqin array
     local_charge=0.d0
-    do i=1,num_atm_fit_ops(atm) ! loop over symmetry-constrained charges
-      op=atm_fit_ops(atm,i)
-      if(allSymOps(op)%typ.eq.'rot'.or.allSymOps(op)%typ.eq.'imp')then
-        chg=tqin(l+1)
-        pt=rotax_to_cartesian(atm,op,tqin(l))
-        call apply_atm_sym_ops(atm,pt,sym_pts,npts)
-        nlast=npts
-        do j=1,npts
-          n=n+1
-          q(n*4-3:n*4-1)=sym_pts(j,:)
-          q(n*4)=chg
-          local_charge=local_charge+chg
-        enddo
-        l=l+2
-      elseif(allSymOps(op)%typ.eq.'ref')then
-        chg=tqin(l+2)
-        pt=refplane_to_cartesian(atm,op,tqin(l),tqin(l+1))
-        call apply_atm_sym_ops(atm,pt,sym_pts,npts)
-        nlast=npts
-        do j=1,npts
-          n=n+1
-          q(n*4-3:n*4-1)=sym_pts(j,:)
-          q(n*4)=chg
-          local_charge=local_charge+chg
-        enddo
-        l=l+3
-      elseif(allSymOps(op)%typ.eq.'inv')then ! nuclear charge spawns no others
-        n=n+1
-        q(n*4-3:n*4-1)=atom_pos(atm,1:3)
-        q(n*4)=tqin(l)
-        local_charge=tqin(l)
-        nlast=1
-        l=l+1
-      elseif(allSymOps(op)%typ.eq.'nuc')then ! nuclear charge spawns no others
-        n=n+1
-        q(n*4-3:n*4-1)=atom_pos(atm,1:3)
-        q(n*4)=tqin(l)
-        local_charge=local_charge+tqin(l) ! keep track of total charge of this arrangement
-        nlast=1 ! remember how many charges were spawned by the last fitted charge
-        l=l+1
-      elseif(allSymOps(op)%typ.eq.'fre')then ! no symmetry
-        chg=tqin(l+3)
-        pt=tqin(l:l+2)
-        call apply_atm_sym_ops(atm,pt,sym_pts,npts)
-        nlast=npts
-        do j=1,npts
-          n=n+1
-          q(n*4-3:n*4-1)=sym_pts(j,:)
-          q(n*4)=chg
-          local_charge=local_charge+chg
-        enddo
-        l=l+4
-      else
-        call throw_error('ERROR: unrecognized operation type in spawn_sym_chgs')
-      endif
-    enddo !i
 
-    ! correct total charge
-    chg_corr=(total_charge-local_charge)/nlast
-    do i=0,nlast-1
-      q(n*4-(i*4))=q(n*4-(i*4))+chg_corr
+    do a=1,num_symFitAtms
+      atm=symFitAtms(a)
+      num_atm_chgs(a)=0
+      n1(a)=n*4
+      do i=1,num_atm_fit_ops(atm) ! loop over symmetry-constrained charges
+        op=atm_fit_ops(atm,i)
+        if(allSymOps(op)%typ.eq.'rot'.or.allSymOps(op)%typ.eq.'imp')then
+          chg=tqin(l+1)
+          pt=rotax_to_cartesian(atm,op,tqin(l))
+          call apply_atm_sym_ops(atm,pt,sym_pts,npts)
+          nlast=npts
+          do j=1,npts
+            n=n+1
+            num_atm_chgs(a)=num_atm_chgs(a)+1
+            tq(n*4-3:n*4-1)=sym_pts(j,:)
+            tq(n*4)=chg
+            local_charge=local_charge+chg
+          enddo
+          l=l+2
+        elseif(allSymOps(op)%typ.eq.'ref')then
+          chg=tqin(l+2)
+          pt=refplane_to_cartesian(atm,op,tqin(l),tqin(l+1))
+          call apply_atm_sym_ops(atm,pt,sym_pts,npts)
+          nlast=npts
+          do j=1,npts
+            n=n+1
+            num_atm_chgs(a)=num_atm_chgs(a)+1
+            tq(n*4-3:n*4-1)=sym_pts(j,:)
+            tq(n*4)=chg
+            local_charge=local_charge+chg
+          enddo
+          l=l+3
+        elseif(allSymOps(op)%typ.eq.'inv')then ! nuclear charge spawns no others
+          n=n+1
+          num_atm_chgs(a)=num_atm_chgs(a)+1
+          tq(n*4-3:n*4-1)=atom_pos(atm,1:3)
+          tq(n*4)=tqin(l)
+          local_charge=local_charge+tqin(l)
+          nlast=1
+          l=l+1
+        elseif(allSymOps(op)%typ.eq.'nuc')then ! nuclear charge spawns no others
+          n=n+1
+          num_atm_chgs(a)=num_atm_chgs(a)+1
+          tq(n*4-3:n*4-1)=atom_pos(atm,1:3)
+          tq(n*4)=tqin(l)
+          local_charge=local_charge+tqin(l) ! keep track of total charge of this arrangement
+          nlast=1 ! remember how many charges were spawned by the last fitted charge
+          l=l+1
+        elseif(allSymOps(op)%typ.eq.'fre')then ! no symmetry
+          chg=tqin(l+3)
+          pt=point_to_cartesian(atm,tqin(l),tqin(l+1),tqin(l+2))
+          call apply_atm_sym_ops(atm,pt,sym_pts,npts)
+          nlast=npts
+          do j=1,npts
+            n=n+1
+            num_atm_chgs(a)=num_atm_chgs(a)+1
+            tq(n*4-3:n*4-1)=sym_pts(j,:)
+            tq(n*4)=chg
+            local_charge=local_charge+chg
+          enddo
+          l=l+4
+        else
+          call throw_error('ERROR: unrecognized operation type in spawn_sym_chgs')
+        endif
+      enddo !i
+    enddo !a
+
+    !store array indices in 'tq()' of charges to correct
+    do i=1,nlast
+      corr_chgs(i)=n*4-((i-1)*4)
     enddo
 
+    tlast=nlast
+    if(replicate_atoms)then !also transform atom charges to other sea's
+      do a=1,num_symFitAtms
+        atm1=symFitAtms(a)
+        do b=2,Natom !loop over sea's
+          if(atom_sea(a,b) == 0) exit
+          atm2=atom_sea(a,b)
+          if(atom_sea(sea_ops(atm2,1),1).ne.atm1) call throw_error('sea mismatch in spawn_sym_chgs')
+          do i=1,num_atm_chgs(a)
+            nn=n1(a)+4*i-3
+            tpos=tq(nn:nn+2)
+            do j=1,sea_ops(atm2,3)
+              tpos=matmul(tpos(:),allSymOps(sea_ops(atm2,2))%M) !transform charge coords
+            enddo
+            n=n+1
+            tq(n*4-3:n*4-1)=tpos(:)
+            tq(n*4)=tq(nn+3)
+            local_charge=local_charge+tq(nn+3)
+            do k=1,tlast
+              if(nn+3.eq.corr_chgs(k)) then ! if this charge was spawned from the atomic charge used to correct the total charge
+                nlast=nlast+1 ! final charge needs correcting
+                corr_chgs(nlast)=n*4
+                exit
+              endif
+            enddo
+          enddo
+        enddo
+      enddo
+    endif
+
+   ! correct total charge
+    chg_corr=(total_charge-local_charge)/nlast
+    do i=1,nlast
+      tq(corr_chgs(i))=chg_corr
+    enddo
     ! transform charges back to global axis:
     do i=1,nq*4-3,4
-      q(i:i+2)=q(i:i+2)+atom_com
-!      write(*,'(A,4F7.3)') ' H ',q(i:i+2),q(i+3)
+      tq(i:i+2)=tq(i:i+2)+atom_com
+!      write(*,'(A,4F7.3)') ' H ',tq(i:i+2),tq(i+3)
     enddo
 !    write(*,'(/)')
- 
+    q(1:size(q,dim=1))=tq(1:size(q,dim=1))
 end subroutine spawn_sym_chgs
 
 !-------------------------------------------------------------------------------
@@ -2021,9 +2121,10 @@ subroutine apply_atm_sym_ops(atom,pt,sym_pts,npts)
     sym_pts(1,1:3)=pt(:)
     do i=1, num_atm_sym_ops(atom)
       op=atm_sym_ops(atom,i)
-      do j=1,npts
+      j=1
+      do while (j.le.npts)
         tpos(:)=sym_pts(j,1:3)
-        do k=1, allSymOps(op)%n-1
+        do k=1, allSymOps(op)%n
           tpos=matmul(tpos(:),allSymOps(op)%M)
           duplicate=.false.
           do l=1,npts
@@ -2036,6 +2137,7 @@ subroutine apply_atm_sym_ops(atom,pt,sym_pts,npts)
             sym_pts(npts,:)=tpos(:)
           endif
         enddo !k
+        j=j+1
       enddo !j
     enddo !i
 
@@ -2043,13 +2145,16 @@ end subroutine apply_atm_sym_ops
 
 !-------------------------------------------------------------------------------
 ! read fitted symmetry-constrained parameters from file
-function read_sym_file(filename,solutions,sqdim,num_charges,atm,maxq)
+function read_sym_file(filename,solutions,sym_solution_ops,num_sym_solution_ops,&
+         sqdim,num_charges,atm,maxq)
 implicit none
 integer :: i,l,ios,atm,sqdim,num_charges,maxq
 logical :: read_sym_file
 character(len=1024) :: dummy,filename
 character(len=4) :: label
 character(len=3) :: typ
+integer, dimension(:,:) :: num_sym_solution_ops
+integer, dimension(:,:,:) :: sym_solution_ops
 real(8), dimension(:) :: solutions
 
 read_sym_file=.false.
@@ -2106,6 +2211,9 @@ if(ios == 0) then
     endif
   enddo
   sqdim=l-1
+  sym_solution_ops(num_charges,atm,1:num_atm_fit_ops(atm))= &
+                            atm_fit_ops(atm,1:num_atm_fit_ops(atm))
+  num_sym_solution_ops(num_charges,atm)=num_atm_fit_ops(atm)
   read_sym_file=.true.
 !  print*,'previous results: ',solutions(:)
 
