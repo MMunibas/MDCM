@@ -716,7 +716,6 @@ if(use_greedy_fit) then
                                             
                     end if
                 end do
-flush(6)
             end if
             if(verbose) write(*,*)
             

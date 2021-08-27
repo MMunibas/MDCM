@@ -2163,8 +2163,10 @@ open(30, file=trim(filename), status="old", action="read", iostat = ios)
 if(ios == 0) then
 
   l=1
-  if(.not.allocated(num_atm_fit_ops)) allocate(num_atm_fit_ops(Natom))  
-  if(.not.allocated(atm_fit_ops)) allocate(atm_fit_ops(Natom,maxq))
+  if(allocated(num_atm_fit_ops)) deallocate(num_atm_fit_ops)
+  if(allocated(atm_fit_ops)) deallocate(atm_fit_ops)
+  allocate(num_atm_fit_ops(Natom))  
+  allocate(atm_fit_ops(Natom,maxq))
   read(30,*,iostat=ios) num_atm_fit_ops(atm)
   do i=1,num_atm_fit_ops(atm)
     ! read symmetry operation index from allSym array, operation type and label

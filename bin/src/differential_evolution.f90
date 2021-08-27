@@ -530,7 +530,6 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
         if(verbose.and.modulo(gen,Nprint) == 0) then
             write(*,'(A4,I6,A1,I0,5X,A9,ES14.7,A,L)') "gen ", gen, "/", maxGens,&
                      " elitist ", fpop(bestindx), " feasible? ", fsblepop(bestindx)
-flush(6)
         end if
         
         ! decrease diversity parameter => focus search more on feasible region
@@ -661,7 +660,6 @@ flush(6)
     x = pop(:,bestindx)
     if(verbose.and..not.feasible(x)) write(*, '(A)') "WARNING: No feasible solution was found!"
     write(*, '(A)') "Starting local simplex optimization:"
-print*,x
     write(*,'(A28,ES21.10)') "Solution before refinement: ", fpop(bestindx)
     if(feasible(x)) call DE_simplex(func,feasible,x)
     write(*,'(A28,ES21.10)') "Solution after  refinement: ", func(x)
