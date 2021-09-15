@@ -24,10 +24,11 @@ type symmetryOperation
     real(8), dimension(3)   :: axis  !vector that describe rotation axis or plane normal
     integer                 :: n     !symmetry order
 end type symmetryOperation          
-integer, parameter :: maxOperations = 100
+integer, parameter :: maxOperations = 20000
           
 
 real(8), save :: tolerance = 0.15d0 !tolerance to consider 2 reals "equal"
+real(8), save :: tolerance_b = 0.01d0 !percentage tolerance to consider 2 reals "equal"
 logical, save :: verbose = .true.
 
 integer, save :: Natom ! number of atoms
@@ -111,7 +112,7 @@ subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
     
     !allocate symmetry equivalent atoms (maximum Natom in each dimension)
     if(     allocated(atom_sea)) deallocate(atom_sea)
-    if(.not.allocated(atom_sea)) allocate  (atom_sea(Natom,Natom))
+    if(.not.allocated(atom_sea)) allocate  (atom_sea(Natom,Natom+1))
     
     !allocate interatomic distance matrix (Natom in each dimension)
     if(     allocated(atom_dist)) deallocate(atom_dist)
@@ -261,7 +262,7 @@ subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
         tmp_sym_op%axis  = axis
         tmp_sym_op%n     = 1
         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
-            call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+            call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
             !also check the reflection
             tmp_sym_op%M = reflection(axis)
             tmp_sym_op%typ = "ref"
@@ -269,7 +270,7 @@ subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
             tmp_sym_op%n     = 1
             write(tmp_sym_op%label,'(A)') "sigh"
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                call add_symmetry_operation_to_list(tmp_sym_op,reflections,num_reflections,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,reflections,num_reflections,.true.)
             !also check the impropers
             tmp_sym_op%M = improper(axis, n = 2)
             tmp_sym_op%axis  = axis
@@ -277,14 +278,14 @@ subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
             tmp_sym_op%typ = "imp"
             write(tmp_sym_op%label,'(A)') "S2"
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
             tmp_sym_op%M = improper(axis, n = 4)
             tmp_sym_op%axis  = axis
             tmp_sym_op%n     = 1
             tmp_sym_op%typ = "imp"
             write(tmp_sym_op%label,'(A)') "S4"
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
         end if
     end do    
     !build a proper list of symmetry operations, also check inversion
@@ -294,7 +295,7 @@ subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
     tmp_sym_op%typ = "inv"
     write(tmp_sym_op%label,'(A)') "i"
     if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
-        call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+        call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
     end if
     if(verbose) then
         write(*,'(A)') 
@@ -352,6 +353,15 @@ subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
                 op_found=.true.
               endif
             enddo
+          else
+            tpos=matmul(tpos(:),allSymOps(k)%M)
+            if(equal(sqrt(sum((atom_pos(atom_sea(i,j),:)-tpos(:))**2)),0d0))then
+              !store sym op to get from first sea in set to jth sea
+              sea_ops(atom_sea(i,j),1)=i !set atom is in
+              sea_ops(atom_sea(i,j),2)=k !index of sym op to use
+              sea_ops(atom_sea(i,j),3)=1 !how many times to apply sym op
+              op_found=.true.
+            endif
           endif
         enddo
         ! thrown error if no sym op transformation was found for this atom
@@ -362,7 +372,6 @@ subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
         endif
       enddo
     enddo
-
 end subroutine symmetry_init
 !-------------------------------------------------------------------------------
 
@@ -668,7 +677,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
             tmp_sym_op%typ = "rot"
             write(tmp_sym_op%label,'(A)') "C%"
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
         end if
     else if (arrangement == LINEAR_ARRANGEMENT)                then
         !calculate the axis (normalized)
@@ -680,7 +689,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         tmp_sym_op%n     = 99 ! infinity would break the code...
         write(tmp_sym_op%label,'(A)') "C%"
         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M )) &
-            call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+            call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
         !check the existence of a C2 perpendicular to the Cinfinity axis
         v1 = axis
         do i = 1,3 !construct some non-colinear axis
@@ -694,7 +703,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         tmp_sym_op%typ = "rot"
         write(tmp_sym_op%label,'(A)') "C2"
         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
-            call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+            call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
             !also check the impropers
             tmp_sym_op%M = improper(axis, n = 2)
             tmp_sym_op%axis  = axis
@@ -702,14 +711,14 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
             tmp_sym_op%typ = "imp"
             write(tmp_sym_op%label,'(A)') "S2"
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
             tmp_sym_op%M = improper(axis, n = 4)
             tmp_sym_op%axis  = axis
             tmp_sym_op%n     = 1
             tmp_sym_op%typ = "imp"
             write(tmp_sym_op%label,'(A)') "S4"
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
         end if
     
         !check other C2 rotations that are perpendicular to the Cinfinity axis
@@ -723,7 +732,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
             tmp_sym_op%typ = "rot"
             write(tmp_sym_op%label,'(A)') "C2"
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
-                call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
                 !also check the impropers
                 tmp_sym_op%M = improper(axis, n = 2)
                 tmp_sym_op%axis  = axis
@@ -731,14 +740,14 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
                 tmp_sym_op%typ = "imp"
                 write(tmp_sym_op%label,'(A)') "S2"
                 if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
                 tmp_sym_op%M = improper(axis, n = 4)
                 tmp_sym_op%axis  = axis
                 tmp_sym_op%n     = 1
                 tmp_sym_op%typ = "imp"
                 write(tmp_sym_op%label,'(A)') "S4"
                 if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
             end if
         end do
     else if (arrangement == POLYGONAL_ARRANGEMENT_REGULAR)     then
@@ -751,7 +760,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         tmp_sym_op%typ = "rot"
         write(tmp_sym_op%label,'(A,I0)') "C",k
         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M )) then
-            call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+            call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
             !also check the impropers
             tmp_sym_op%M = improper(axis, n = k)
             tmp_sym_op%axis  = axis
@@ -759,14 +768,14 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
             tmp_sym_op%typ = "imp"
             write(tmp_sym_op%label,'(A,I0)') "S",k
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
             tmp_sym_op%M = improper(axis, n = 2*k)
             tmp_sym_op%axis  = axis
             tmp_sym_op%n     = 1
             tmp_sym_op%typ = "imp"
             write(tmp_sym_op%label,'(A,I0)') "S",2*k
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
         end if
         !check divisors of k (Ci rotations)
         do i = 2,k/2
@@ -776,7 +785,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
             tmp_sym_op%typ = "rot"
             write(tmp_sym_op%label,'(A,I0)') "C",i
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
-                call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
                 !also check the impropers
                 tmp_sym_op%M = improper(axis, n = i)
                 tmp_sym_op%axis  = axis
@@ -784,14 +793,14 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
                 tmp_sym_op%typ = "imp"
                 write(tmp_sym_op%label,'(A,I0)') "S",i
                 if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
                 tmp_sym_op%M = improper(axis, n = 2*i)
                 tmp_sym_op%axis  = axis
                 tmp_sym_op%n     = 1
                 tmp_sym_op%typ = "imp"
                 write(tmp_sym_op%label,'(A,I0)') "S",2*i
                 if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
             end if
         end do
         !check the reflection along the principal axis
@@ -801,7 +810,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         tmp_sym_op%typ = "ref"
         write(tmp_sym_op%label,'(A)') "sigh"
         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-            call add_symmetry_operation_to_list(tmp_sym_op,reflections,num_reflections,.false.)
+            call add_symmetry_operation_to_list(tmp_sym_op,reflections,num_reflections,.true.)
     else if (arrangement == POLYGONAL_ARRANGEMENT_IRREGULAR)   then
         !calculate an axis perpendicular to the plane of atoms in set
         axis = crossProduct(pos(1,:)-pos(2,:),pos(1,:)-pos(3,:))
@@ -813,7 +822,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
             tmp_sym_op%typ = "rot"
             write(tmp_sym_op%label,'(A,I0)') "C",i
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
-                call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
                 !also check the impropers
                 tmp_sym_op%M = improper(axis, n = i)
                 tmp_sym_op%axis  = axis
@@ -821,14 +830,14 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
                 tmp_sym_op%typ = "imp"
                 write(tmp_sym_op%label,'(A,I0)') "S",i
                 if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
                 tmp_sym_op%M = improper(axis, n = 2*i)
                 tmp_sym_op%axis  = axis
                 tmp_sym_op%n     = 1
                 tmp_sym_op%typ = "imp"
                 write(tmp_sym_op%label,'(A,I0)') "S",2*i
                 if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
             end if
         end do
         !check the reflection along the principal axis
@@ -838,7 +847,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         tmp_sym_op%typ = "ref"
         write(tmp_sym_op%label,'(A)') "sigh"
         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-            call add_symmetry_operation_to_list(tmp_sym_op,reflections,num_reflections,.false.)
+            call add_symmetry_operation_to_list(tmp_sym_op,reflections,num_reflections,.true.)
     else if (arrangement == POLYHEDRAL_ARRANGEMENT_SPHERIC) then
         !the possible rotation axis will always pass through one of the atoms and the center of mass,
         !so we try all atoms
@@ -851,7 +860,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
                 tmp_sym_op%typ = "rot"
                 write(tmp_sym_op%label,'(A,I0)') "C",j
                 if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M )) then
-                    call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+                    call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
                     !also check the impropers
                     tmp_sym_op%M = improper(axis, n = j)
                     tmp_sym_op%axis  = axis
@@ -859,14 +868,14 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
                     tmp_sym_op%typ = "imp"
                     write(tmp_sym_op%label,'(A,I0)') "S",j
                     if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                        call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                        call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
                     tmp_sym_op%M = improper(axis, n = 2*j)
                     tmp_sym_op%axis  = axis
                     tmp_sym_op%n     = 1
                     tmp_sym_op%typ = "imp"
                     write(tmp_sym_op%label,'(A,I0)') "S",2*j
                     if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                        call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                        call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
                 end if
             end do
             !or it passes through the midpoint of atoms
@@ -880,7 +889,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
                     tmp_sym_op%typ = "rot"
                     write(tmp_sym_op%label,'(A,I0)') "C",l
                     if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M )) then
-                        call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+                        call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
                         !also check the impropers
                         tmp_sym_op%M = improper(axis, n = l)
                         tmp_sym_op%axis  = axis
@@ -888,14 +897,14 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
                         tmp_sym_op%typ = "imp"
                         write(tmp_sym_op%label,'(A,I0)') "S",l
                         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                            call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                            call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
                         tmp_sym_op%M = improper(axis, n = 2*l)
                         tmp_sym_op%axis  = axis
                         tmp_sym_op%n     = 1
                         tmp_sym_op%typ = "imp"
                         write(tmp_sym_op%label,'(A,I0)') "S",2*l
                         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                            call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                            call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
                     end if
                 end do  
             end do
@@ -921,7 +930,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
             tmp_sym_op%typ = "rot"
             write(tmp_sym_op%label,'(A,I0)') "C",i
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
-                call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
                 !also check the impropers
                 tmp_sym_op%M = improper(axis, n = i)
                 tmp_sym_op%axis  = axis
@@ -929,14 +938,14 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
                 tmp_sym_op%typ = "imp"
                 write(tmp_sym_op%label,'(A,I0)') "S",i
                 if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
                 tmp_sym_op%M = improper(axis, n = 2*i)
                 tmp_sym_op%axis  = axis
                 tmp_sym_op%n     = 1
                 tmp_sym_op%typ = "imp"
                 write(tmp_sym_op%label,'(A,I0)') "S",2*i
                 if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
             end if
         end do
         !check the existence of C2 axes perpendicular to the principal axis
@@ -950,7 +959,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
                     tmp_sym_op%typ = "rot"
                     write(tmp_sym_op%label,'(A)') "C2"
                     if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
-                        call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+                        call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
                         !also check the impropers
                         tmp_sym_op%M = improper(v1, n = 2)
                         tmp_sym_op%axis  = v1
@@ -958,14 +967,14 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
                         tmp_sym_op%typ = "imp"
                         write(tmp_sym_op%label,'(A)') "S2"
                         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                            call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                            call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
                         tmp_sym_op%M = improper(v1, n = 4)
                         tmp_sym_op%axis  = v1
                         tmp_sym_op%n     = 1
                         tmp_sym_op%typ = "imp"
                         write(tmp_sym_op%label,'(A)') "S4"
                         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                            call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                            call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
                     end if
                 end if
             end do
@@ -979,7 +988,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         tmp_sym_op%n     = 1
         tmp_sym_op%typ = "rot"
         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
-            call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+            call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
             !also check the impropers
             tmp_sym_op%M = improper(axis, n = 2)
             tmp_sym_op%axis  = axis
@@ -987,14 +996,14 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
             tmp_sym_op%typ = "imp"
             write(tmp_sym_op%label,'(A)') "S2"
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
             tmp_sym_op%M = improper(axis, n = 4)
             tmp_sym_op%axis  = axis
             tmp_sym_op%n     = 1
             tmp_sym_op%typ = "imp"
             write(tmp_sym_op%label,'(A)') "S4"
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
         end if
         axis = v2
         tmp_sym_op%M = rotation(axis, n = 2)
@@ -1002,7 +1011,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         tmp_sym_op%n     = 1
         tmp_sym_op%typ = "rot"
         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
-            call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+            call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
             !also check the impropers
             tmp_sym_op%M = improper(axis, n = 2)
             tmp_sym_op%axis  = axis
@@ -1010,14 +1019,14 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
             tmp_sym_op%typ = "imp"
             write(tmp_sym_op%label,'(A)') "S2"
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
             tmp_sym_op%M = improper(axis, n = 4)
             tmp_sym_op%axis  = axis
             tmp_sym_op%n     = 1
             tmp_sym_op%typ = "imp"
             write(tmp_sym_op%label,'(A)') "S4"
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
         end if
         axis = v3
         tmp_sym_op%M = rotation(axis, n = 2)
@@ -1025,7 +1034,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         tmp_sym_op%n     = 1
         tmp_sym_op%typ = "rot"
         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
-            call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+            call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
             !also check the impropers
             tmp_sym_op%M = improper(axis, n = 2)
             tmp_sym_op%axis  = axis
@@ -1033,14 +1042,14 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
             tmp_sym_op%typ = "imp"
             write(tmp_sym_op%label,'(A)') "S2"
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
             tmp_sym_op%M = improper(axis, n = 4)
             tmp_sym_op%axis  = axis
             tmp_sym_op%n     = 1
             tmp_sym_op%typ = "imp"
             write(tmp_sym_op%label,'(A)') "S4"
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
         end if
     end if
     
@@ -1060,7 +1069,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
                     tmp_sym_op%n     = 1
                     tmp_sym_op%typ = "rot"
                     if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
-                        call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+                        call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
                         !also check the impropers
                         tmp_sym_op%M = improper(axis, n = 2)
                         tmp_sym_op%axis  = axis
@@ -1068,14 +1077,14 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
                         tmp_sym_op%typ = "imp"
                         write(tmp_sym_op%label,'(A)') "S2"
                         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                            call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                            call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
                         tmp_sym_op%M = improper(axis, n = 4)
                         tmp_sym_op%axis  = axis
                         tmp_sym_op%n     = 1
                         tmp_sym_op%typ = "imp"
                         write(tmp_sym_op%label,'(A)') "S4"
                         if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                            call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                            call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
                     end if
                 end if
             end do
@@ -1088,7 +1097,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
             tmp_sym_op%n     = 1
             tmp_sym_op%typ = "rot"
             if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
-                call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.false.)
+                call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
                 !also check the impropers
                 tmp_sym_op%M = improper(axis, n = 2)
                 tmp_sym_op%axis  = axis
@@ -1096,14 +1105,14 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
                 tmp_sym_op%typ = "imp"
                 write(tmp_sym_op%label,'(A)') "S2"
                 if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
                 tmp_sym_op%M = improper(axis, n = 4)
                 tmp_sym_op%axis  = axis
                 tmp_sym_op%n     = 1
                 tmp_sym_op%typ = "imp"
                 write(tmp_sym_op%label,'(A)') "S4"
                 if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.false.)
+                    call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
             end if
         end do
     end if
@@ -1119,8 +1128,9 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
             tmp_sym_op%axis  = axis
             tmp_sym_op%n     = 1
             tmp_sym_op%typ = "ref"
-            if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                call add_symmetry_operation_to_list(tmp_sym_op,reflections,num_reflections,.false.)
+            if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
+                call add_symmetry_operation_to_list(tmp_sym_op,reflections,num_reflections,.true.)
+            endif
         end do
     end do
     
@@ -1138,7 +1148,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
                 tmp_sym_op%n     = 1
                 tmp_sym_op%typ = "ref"
                 if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
-                    call add_symmetry_operation_to_list(tmp_sym_op,reflections,num_reflections,.false.)
+                    call add_symmetry_operation_to_list(tmp_sym_op,reflections,num_reflections,.true.)
             end if
         end do    
     end if
@@ -1193,6 +1203,8 @@ logical function equal(r1,r2)
     real(8), intent(in) :: r1,r2
     if(abs(r1-r2) <= tolerance) then
         equal = .true.
+    elseif(abs(r1).gt.10.d0.and.abs((r1-r2)/r1) <= tolerance_b) then
+        equal = .true.
     else
         equal = .false.
     end if
@@ -1201,7 +1213,7 @@ end function equal
 
 !-------------------------------------------------------------------------------
 ! determines whether a given operation op is a symmetry operation for a set of
-! positions and identifiers
+! positions and identifiers (atom types)
 logical function isSymmetryOperation(pos,ident,op)
     implicit none
     real(8), dimension(:,:),               intent(in)   :: pos

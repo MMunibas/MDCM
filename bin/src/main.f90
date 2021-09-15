@@ -1067,6 +1067,7 @@ do num_charges = num_charges_min,num_charges_max
         end do
     end if
     if(verbose) write(*,*)
+    flush(6)
     ! clean up
     call DE_exit()
 end do
