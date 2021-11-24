@@ -81,10 +81,10 @@ for i in range(minchgs, maxchgs):
 				rmse_avg += rmse
 			rmse_perm[iperm] = rmse_avg/nfrag
 		try:
-			print("Found minimal solution with RMSE: " np.min(rmse_perm))
+			print("Found minimal solution with RMSE: "+str(np.min(rmse_perm)))
 			os.system(combine_frags(nfrag, nfit, fit_index[:, np.argmin(rmse_perm)], perm[np.argmin(rmse_perm), :], FRAGDIR, BINDIR))
 		except IndexError as e:
-			print("Found minimal solution with RMSE: " np.min(rmse_perm))
+			print("Found minimal solution with RMSE: "+str(np.min(rmse_perm)))
 			os.system(combine_frags(nfrag, nfit, fit_index[:, np.argmin(rmse_perm)], perm, FRAGDIR, BINDIR))		
 		os.system("mv combined.xyz "+ WORKDIR + "/" + str(int(i)) + "-combined.xyz")
 		os.system("rm permutations-" + str(i) + ".dat")
