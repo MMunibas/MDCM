@@ -16,19 +16,20 @@ public :: getNumSymOps, sym_init_pars, read_sym_file, write_sym_file, sym_map_se
 public :: init_atm_sym_search, sym_init_fit_ops
           !calc_eigenvalues, calc_eigenvectors, rotation !only for test reasons public
           
+integer, parameter :: rp = kind(0d0)
 !type definition of symmetry operations
 type symmetryOperation
     character(len=4)        :: label !identifies the symmetryOperation, e.g. Cn, sig, i, etc.
     character(len=3)        :: typ   !type of operation (rot(ation),ref(lection),imp(roper),inv(ersion))
-    real(8), dimension(3,3) :: M     !matrix that describes the symmetry operation
-    real(8), dimension(3)   :: axis  !vector that describe rotation axis or plane normal
+    real(rp), dimension(3,3) :: M     !matrix that describes the symmetry operation
+    real(rp), dimension(3)   :: axis  !vector that describe rotation axis or plane normal
     integer                 :: n     !symmetry order
 end type symmetryOperation          
 integer, parameter :: maxOperations = 20000
           
 
-real(8), save :: tolerance = 0.15d0 !tolerance to consider 2 reals "equal"
-real(8), save :: tolerance_b = 0.01d0 !percentage tolerance to consider 2 reals "equal"
+real(rp), save :: tolerance = 0.15d0 !tolerance to consider 2 reals "equal"
+real(rp), save :: tolerance_b = 0.01d0 !percentage tolerance to consider 2 reals "equal"
 logical, save :: verbose = .true.
 
 integer, save :: Natom ! number of atoms
@@ -41,14 +42,14 @@ integer, dimension(:,:), allocatable,save :: num_spawned ! array of charges spaw
 integer, dimension(:,:), allocatable, save :: atm_sym_ops ! array of symmetry operations to apply to charges
 integer, dimension(:,:), allocatable, save :: atm_fit_ops ! array of symmetry operations for each atom to use during charge fitting
 
-real(8), dimension(:,:), allocatable, save :: atom_pos ! stores the atomic positions [Natom,3]
-real(8), dimension(3),                save :: atom_com, atom_axisA, atom_axisB, atom_axisC ! centre of mass of the atoms and axes
-real(8), dimension(3,3),              save :: atom_inertia !inertia tensor of atoms
-real(8),                              save :: atom_Ia, atom_Ib, atom_Ic !principal moments of inertia
+real(rp), dimension(:,:), allocatable, save :: atom_pos ! stores the atomic positions [Natom,3]
+real(rp), dimension(3),                save :: atom_com, atom_axisA, atom_axisB, atom_axisC ! centre of mass of the atoms and axes
+real(rp), dimension(3,3),              save :: atom_inertia !inertia tensor of atoms
+real(rp),                              save :: atom_Ia, atom_Ib, atom_Ic !principal moments of inertia
 integer,                              save :: atom_rotor_type ! rotor type based on moments of inertia
 integer, dimension(:,:), allocatable, save :: atom_sea        ! symmetry equivalent atoms
-real(8), dimension(:,:), allocatable, save :: atom_dist       ! interdistance matrix
-real(8), dimension(:),   allocatable, save :: atom_identifier ! unique identifier for atom type, e. g. order number
+real(rp), dimension(:,:), allocatable, save :: atom_dist       ! interdistance matrix
+real(rp), dimension(:),   allocatable, save :: atom_identifier ! unique identifier for atom type, e. g. order number
                                                               ! (for charges, this could be the charge magnitude!)
 
 public :: atom_sea
@@ -94,12 +95,12 @@ contains
 subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
     implicit none 
     integer, intent(in) :: set_Natom
-    real(8), dimension(set_Natom,3) :: set_atom_pos
-    real(8), dimension(set_Natom)   :: set_atom_identifier
-    real(8), dimension(3) :: v1, v2, axis, zero, tpos
-    real(8) :: tmp
+    real(rp), dimension(set_Natom,3) :: set_atom_pos
+    real(rp), dimension(set_Natom)   :: set_atom_identifier
+    real(rp), dimension(3) :: v1, v2, axis, zero, tpos, tpos2
+    real(rp) :: tmp
     integer :: arrangement
-    integer :: i,j,k,l
+    integer :: i,j,k,l,m
     logical :: op_found
     type(symmetryOperation) :: tmp_sym_op
 
@@ -253,8 +254,8 @@ subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
         axis(1) = v1(2)*v2(3) - v1(3)*v2(2)
         axis(2) = v1(3)*v2(1) - v1(1)*v2(3)
         axis(3) = v1(1)*v2(2) - v1(2)*v2(1)  
+        if(equal(sum(axis**2),0d0)) cycle
         tmp = sqrt(sum(axis**2))
-        if(equal(tmp,0d0)) cycle
         axis = axis/tmp
         tmp_sym_op%label = "C2"
         tmp_sym_op%typ = "rot"
@@ -295,7 +296,8 @@ subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
     tmp_sym_op%typ = "inv"
     write(tmp_sym_op%label,'(A)') "i"
     if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) then
-        call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
+!        call add_symmetry_operation_to_list(tmp_sym_op,rotations,num_rotations,.true.)
+        call add_symmetry_operation_to_list(tmp_sym_op,allSymOps,num_SymOps,.true.)
     end if
     if(verbose) then
         write(*,'(A)') 
@@ -334,7 +336,7 @@ subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
     end do
     
     !finally, determine symmetry ops required to transform the first sea in each group to each of the others
-    allocate(sea_ops(Natom,3))
+    allocate(sea_ops(Natom,4))
     do i = 1,Natom ! loop over sea sets
       if(count(atom_sea(i,:) /= 0) == 0) exit
       do j=2,Natom ! loop over sea's in set
@@ -349,7 +351,8 @@ subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
                 !store sym op to get from first sea in set to jth sea
                 sea_ops(atom_sea(i,j),1)=i !set atom is in
                 sea_ops(atom_sea(i,j),2)=k !index of sym op to use
-                sea_ops(atom_sea(i,j),3)=l !how many times to apply sym op
+                sea_ops(atom_sea(i,j),3)=0 !index of 2nd sym op to use
+                sea_ops(atom_sea(i,j),4)=l !how many times to apply sym op
                 op_found=.true.
               endif
             enddo
@@ -359,11 +362,47 @@ subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
               !store sym op to get from first sea in set to jth sea
               sea_ops(atom_sea(i,j),1)=i !set atom is in
               sea_ops(atom_sea(i,j),2)=k !index of sym op to use
-              sea_ops(atom_sea(i,j),3)=1 !how many times to apply sym op
+              sea_ops(atom_sea(i,j),3)=0 !index of 2nd sym op to use
+              sea_ops(atom_sea(i,j),4)=1 !how many times to apply sym op
               op_found=.true.
             endif
           endif
         enddo
+        ! if we didn't find any single operation, try a combination of two operations
+        if(.not.op_found)then
+          do k=1,num_SymOps
+            tpos(:)=atom_pos(atom_sea(i,1),:)
+            if(allSymOps(k)%typ.eq.'rot'.or.allSymOps(k)%typ.eq.'imp')then
+              do l=1,allSymOps(k)%n
+                tpos=matmul(tpos(:),allSymOps(k)%M)
+                do m=1,num_SymOps
+                  tpos2=matmul(tpos(:),allSymOps(m)%M)
+                  if(equal(sqrt(sum((atom_pos(atom_sea(i,j),:)-tpos2(:))**2)),0d0))then
+                    !store sym op to get from first sea in set to jth sea
+                    sea_ops(atom_sea(i,j),1)=i !set atom is in
+                    sea_ops(atom_sea(i,j),2)=k !index of sym op to use
+                    sea_ops(atom_sea(i,j),3)=m !index of sym op to use
+                    sea_ops(atom_sea(i,j),4)=l !how many times to apply sym op
+                    op_found=.true.
+                  endif
+                enddo
+              enddo
+            else
+              tpos=matmul(tpos(:),allSymOps(k)%M)
+              do m=1,num_SymOps
+                tpos2=matmul(tpos(:),allSymOps(m)%M)
+                if(equal(sqrt(sum((atom_pos(atom_sea(i,j),:)-tpos2(:))**2)),0d0))then
+                  !store sym op to get from first sea in set to jth sea
+                  sea_ops(atom_sea(i,j),1)=i !set atom is in
+                  sea_ops(atom_sea(i,j),2)=k !index of sym op to use
+                  sea_ops(atom_sea(i,j),3)=m !index of sym op to use
+                  sea_ops(atom_sea(i,j),4)=1 !how many times to apply sym op
+                  op_found=.true.
+                endif
+              enddo
+            endif
+          enddo
+        endif
         ! thrown error if no sym op transformation was found for this atom
         if(.not.op_found)then
           write(*,'(2(A,I0))') 'No symmetry transormation found to link atom ',&
@@ -372,6 +411,7 @@ subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
         endif
       enddo
     enddo
+flush(6)
 end subroutine symmetry_init
 !-------------------------------------------------------------------------------
 
@@ -381,12 +421,12 @@ end subroutine symmetry_init
 ! Communications of the ACM 4 (4): 168, doi:10.1145/355578.366316
 subroutine calc_eigenvalues(A,eig1,eig2,eig3)
     implicit none
-    real(8), parameter                  :: pi = acos(-1d0)
-    real(8), dimension(3,3), parameter  :: I = reshape((/ 1, 0, 0, 0, 1, 0, 0, 0, 1/), (/3,3/))
-    real(8), dimension(3,3), intent(in) :: A
-    real(8), dimension(3,3)             :: B
-    real(8), intent(out) :: eig1, eig2, eig3
-    real(8) :: p1, p2, p, q, r, phi
+    real(rp), parameter                  :: pi = acos(-1d0)
+    real(rp), dimension(3,3), parameter  :: I = reshape((/ 1, 0, 0, 0, 1, 0, 0, 0, 1/), (/3,3/))
+    real(rp), dimension(3,3), intent(in) :: A
+    real(rp), dimension(3,3)             :: B
+    real(rp), intent(out) :: eig1, eig2, eig3
+    real(rp) :: p1, p2, p, q, r, phi
     
     p1 = A(1,2)**2 + A(1,3)**2 + A(2,3)**2
     if(equal(p1,0d0)) then !A is diagonal, the task is easy
@@ -441,12 +481,12 @@ end subroutine calc_eigenvalues
 ! Eigenvectors of a 3x3 matrix, given the eigenvalues (by Cayley-Hamilton theorem)
 subroutine calc_eigenvectors(A,eig1,eig2,eig3,vec1,vec2,vec3)
     implicit none
-    real(8), dimension(3,3), parameter   :: I = reshape((/ 1, 0, 0, 0, 1, 0, 0, 0, 1/), (/3,3/))
-    real(8), dimension(3,3), intent(in)  :: A
-    real(8), intent(in)                  :: eig1, eig2, eig3
-    real(8), dimension(3),   intent(out) :: vec1, vec2, vec3
-    real(8), dimension(3,3)              :: Am1, Am2, Am3, P
-    real(8) :: tmp
+    real(rp), dimension(3,3), parameter   :: I = reshape((/ 1, 0, 0, 0, 1, 0, 0, 0, 1/), (/3,3/))
+    real(rp), dimension(3,3), intent(in)  :: A
+    real(rp), intent(in)                  :: eig1, eig2, eig3
+    real(rp), dimension(3),   intent(out) :: vec1, vec2, vec3
+    real(rp), dimension(3,3)              :: Am1, Am2, Am3, P
+    real(rp) :: tmp
     integer :: j
     
     Am1 = A - eig1*I
@@ -556,8 +596,8 @@ end subroutine calc_eigenvectors
 subroutine find_sea(sea,dist,identifier)
     implicit none
     integer, dimension(:,:), intent(out) :: sea  !output set of SEAs
-    real(8), dimension(:,:), intent(in)  :: dist !interdistance matrix
-    real(8), dimension(:),   intent(in)  :: identifier !"labels" of the atoms
+    real(rp), dimension(:,:), intent(in)  :: dist !interdistance matrix
+    real(rp), dimension(:),   intent(in)  :: identifier !"labels" of the atoms
     integer, dimension(size(sea,dim=1))  :: numInSet
     integer :: i,j,numSets
     logical :: foundMatch
@@ -628,17 +668,17 @@ end subroutine add_symmetry_operation_to_list
 !also has these symmetry elements (if not, they are useless)
 subroutine find_symmetry_elements_of_sea_set(set,arrangement)
     implicit none
-    real(8), parameter :: pi = acos(-1d0)
-    real(8), parameter :: goldenangle = pi*(3d0-sqrt(5d0)) !for checking C infinity
+    real(rp), parameter :: pi = acos(-1d0)
+    real(rp), parameter :: goldenangle = pi*(3d0-sqrt(5d0)) !for checking C infinity
     integer, dimension(:), intent(in) :: set
     integer, intent(out) :: arrangement
-    real(8), dimension(3,3) :: inertia !atom inertia tensor 
-    real(8), dimension(3) :: com !center of mass
-    real(8), dimension(size(set, dim=1),3) :: pos !shifted coordinates
-    real(8) :: Ia, Ib, Ic, tmp !principal moments of inertia
+    real(rp), dimension(3,3) :: inertia !atom inertia tensor 
+    real(rp), dimension(3) :: com !center of mass
+    real(rp), dimension(size(set, dim=1),3) :: pos !shifted coordinates
+    real(rp) :: Ia, Ib, Ic, tmp !principal moments of inertia
     
     !helper variables to detect symmetry operation
-    real(8), dimension(3)   :: axis, v1, v2, v3   !an axis for rotation
+    real(rp), dimension(3)   :: axis, v1, v2, v3   !an axis for rotation
     
     type(symmetryOperation) :: tmp_sym_op
     
@@ -852,7 +892,12 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         !the possible rotation axis will always pass through one of the atoms and the center of mass,
         !so we try all atoms
         do i = 1,k
-            axis = (pos(i,:)-com)/sqrt(sum((pos(i,:)-com)**2))
+            !catch divide by zero
+            if(sum((pos(i,:)-com)**2) == 0.d0) then
+              axis(:)=0.d0
+            else
+              axis = (pos(i,:)-com)/sqrt(sum((pos(i,:)-com)**2))
+            endif
             do j = 2,k-1
                 tmp_sym_op%M = rotation(axis, n = j)  
                 tmp_sym_op%axis  = axis
@@ -881,7 +926,11 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
             !or it passes through the midpoint of atoms
             do j = i+1,k
                 v1 = (pos(i,:)+pos(j,:))/2d0
-                axis = v1/sqrt(sum(v1**2))  
+                if(sum(v1**2) == 0.d0) then
+                  axis(:) = 0.d0
+                else
+                  axis = v1/sqrt(sum(v1**2))  
+                endif
                 do l = 2,k-1
                     tmp_sym_op%M = rotation(axis, n = l)  
                     tmp_sym_op%axis  = axis
@@ -1091,7 +1140,12 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         end do
         !B)
         do i = 1,k
-            axis = pos(i,:)/sqrt(sum(pos(i,:)**2))
+            !catch divide by zero
+            if(sum(pos(i,:)**2) == 0) then
+              axis(:)=0.d0
+            else
+              axis = pos(i,:)/sqrt(sum(pos(i,:)**2))
+            endif
             tmp_sym_op%M = rotation(axis, n = 2)
             tmp_sym_op%axis  = axis
             tmp_sym_op%n     = 1
@@ -1163,7 +1217,7 @@ end subroutine find_symmetry_elements_of_sea_set
 !checks whether two sets contain the same elements (this is needed to get symmetry equivalent atoms from distance matrix)
 logical function sameElementsInSet(s1,s2)
     implicit none
-    real(8), dimension(:), intent(in)  :: s1,s2
+    real(rp), dimension(:), intent(in)  :: s1,s2
     logical, dimension(size(s2,dim=1)) :: alreadyMatched !keeps track of whether an element of s2 is already matched
     logical :: foundMatch
     integer :: i,j
@@ -1200,7 +1254,7 @@ end function sameElementsInSet
 ! determines whether 2 reals are equal (up to a certain tolerance threshold)
 logical function equal(r1,r2)
     implicit none
-    real(8), intent(in) :: r1,r2
+    real(rp), intent(in) :: r1,r2
     if(abs(r1-r2) <= tolerance) then
         equal = .true.
     elseif(abs(r1).gt.10.d0.and.abs((r1-r2)/r1) <= tolerance_b) then
@@ -1216,10 +1270,10 @@ end function equal
 ! positions and identifiers (atom types)
 logical function isSymmetryOperation(pos,ident,op)
     implicit none
-    real(8), dimension(:,:),               intent(in)   :: pos
-    real(8), dimension(size(pos,dim=1)),   intent(in)   :: ident
-    real(8), dimension(3,3),               intent(in)   :: op
-    real(8), dimension(size(pos,dim=1),size(pos,dim=2)) :: posXop
+    real(rp), dimension(:,:),               intent(in)   :: pos
+    real(rp), dimension(size(pos,dim=1)),   intent(in)   :: ident
+    real(rp), dimension(3,3),               intent(in)   :: op
+    real(rp), dimension(size(pos,dim=1),size(pos,dim=2)) :: posXop
     logical :: foundMatch
     integer :: i,j
     posXop = matmul(pos,op)
@@ -1248,13 +1302,13 @@ end function isSymmetryOperation
 
 !-------------------------------------------------------------------------------
 ! returns the magnitude of assymetry for a given symmetry operation op
-real(8) function asymmetryMagnitude(pos,ident,op)
+real(rp) function asymmetryMagnitude(pos,ident,op)
     implicit none
-    real(8), dimension(:,:),               intent(in)   :: pos
-    real(8), dimension(size(pos,dim=1)),   intent(in)   :: ident
-    real(8), dimension(3,3),               intent(in)   :: op
-    real(8), dimension(size(pos,dim=1),size(pos,dim=2)) :: posXop
-    real(8) :: diff
+    real(rp), dimension(:,:),               intent(in)   :: pos
+    real(rp), dimension(size(pos,dim=1)),   intent(in)   :: ident
+    real(rp), dimension(3,3),               intent(in)   :: op
+    real(rp), dimension(size(pos,dim=1),size(pos,dim=2)) :: posXop
+    real(rp) :: diff
     integer :: i,j   
     asymmetryMagnitude = 0d0
     posXop = matmul(pos,op)
@@ -1275,7 +1329,7 @@ end function asymmetryMagnitude
 ! determines the rotor type of the molecule based on principal moments of inertia
 integer function rotorType(Ia,Ib,Ic)
     implicit none
-    real(8), intent(in) :: Ia,Ib,Ic
+    real(rp), intent(in) :: Ia,Ib,Ic
     !determine the rotortype based on the principal moments of inertia
     if(      (equal(Ia,0d0).and.equal(Ib,Ic)).or.&
              (equal(Ib,0d0).and.equal(Ia,Ic)).or.&
@@ -1299,7 +1353,7 @@ end function rotorType
 ! of symmetry equivalent atoms
 integer function arrangementType(Ia,Ib,Ic)
     implicit none
-    real(8), intent(in) :: Ia,Ib,Ic
+    real(rp), intent(in) :: Ia,Ib,Ic
     if      ( equal(Ia,0d0).and.equal(Ib,0d0).and.equal(Ic,0d0) ) then
         arrangementType = SINGLE_ATOM
     else if ((equal(Ia,0d0).and.equal(Ib,Ic)).or.&
@@ -1330,8 +1384,8 @@ end function arrangementType
 !returns the center of mass of a set of coordinates
 function centerOfMass(pos)
     implicit none
-    real(8), dimension(:,:), intent(in) :: pos !dimension (?,3)
-    real(8), dimension(3) :: centerOfMass
+    real(rp), dimension(:,:), intent(in) :: pos !dimension (?,3)
+    real(rp), dimension(3) :: centerOfMass
     integer :: i
     centerOfMass = 0d0
     do i = 1,size(pos,dim=1)
@@ -1345,8 +1399,8 @@ end function centerOfMass
 !returns the inertia tensor of a set of coordinates
 function inertiaTensor(pos)
     implicit none
-    real(8), dimension(:,:), intent(in)  :: pos
-    real(8), dimension(3,3) :: inertiaTensor
+    real(rp), dimension(:,:), intent(in)  :: pos
+    real(rp), dimension(3,3) :: inertiaTensor
     !Ixx
     inertiaTensor(1,1) = sum(pos(:,2)**2 + pos(:,3)**2)
     !Ixy
@@ -1372,8 +1426,8 @@ end function inertiaTensor
 !returns the normalized crossProduct of two vectors v1 and v2
 function crossProduct(v1,v2)
     implicit none
-    real(8), dimension(3), intent(in) :: v1, v2
-    real(8), dimension(3) :: crossProduct
+    real(rp), dimension(3), intent(in) :: v1, v2
+    real(rp), dimension(3) :: crossProduct
     crossProduct(1) = v1(2)*v2(3) - v1(3)*v2(2)
     crossProduct(2) = v1(3)*v2(1) - v1(1)*v2(3)
     crossProduct(3) = v1(1)*v2(2) - v1(2)*v2(1)  
@@ -1386,8 +1440,8 @@ end function crossProduct
 ! calculates the interdistance matrix of a set of coordinates
 function interdistanceMatrix(pos)
     implicit none
-    real(8), dimension(:,:), intent(in)  :: pos
-    real(8), dimension(size(pos,dim=1),size(pos,dim=1)) :: interdistanceMatrix
+    real(rp), dimension(:,:), intent(in)  :: pos
+    real(rp), dimension(size(pos,dim=1),size(pos,dim=1)) :: interdistanceMatrix
     integer :: i,j,dims
     interdistanceMatrix = 0d0
     dims = size(pos,dim=1)
@@ -1404,7 +1458,7 @@ end function interdistanceMatrix
 ! calculates the interdistance matrix of a set of coordinates
 function getShiftedPos(atom)
     implicit none
-    real(8), dimension(3) :: getShiftedPos
+    real(rp), dimension(3) :: getShiftedPos
     integer :: atom
 
     getShiftedPos = atom_pos(atom,:)
@@ -1419,7 +1473,7 @@ function getChargeOps(atom)
     integer i,atom,getChargeOps
     logical toadd
 
-    real(8), dimension(3) :: posXop, shift_pos    ! atomic positions shifted to CoM and transformed by symmetry ops
+    real(rp), dimension(3) :: posXop, shift_pos    ! atomic positions shifted to CoM and transformed by symmetry ops
 
     if(.not.allocated(atm_sym_ops)) allocate(atm_sym_ops(Natom,num_SymOps))
     if(.not.allocated(num_atm_sym_ops)) allocate(num_atm_sym_ops(Natom))
@@ -1477,8 +1531,8 @@ function chgsSpawned(atom,pos)
     integer :: atom,chgsSpawned
     integer :: i,j,k,l,op,num_trans_chg
     integer, parameter :: MAX_CHG=9999
-    real(8), dimension(3) :: pos,tpos
-    real(8), dimension(MAX_CHG,3) :: trans_pos ! no idea how many charges we'll have in advance...
+    real(rp), dimension(3) :: pos,tpos
+    real(rp), dimension(MAX_CHG,3) :: trans_pos ! no idea how many charges we'll have in advance...
     logical :: duplicate
 
     num_trans_chg=1
@@ -1523,8 +1577,8 @@ end function chgsSpawned
 function rotax_to_cartesian(atom,op,r)
     implicit none
     integer :: atom,op ! op is index in array "allSymOps"
-    real(8), dimension(3) :: rotax_to_cartesian
-    real(8) :: r
+    real(rp), dimension(3) :: rotax_to_cartesian
+    real(rp) :: r
 
     if(allSymOps(op)%typ.ne.'rot'.and.allSymOps(op)%typ.ne.'imp')then
       write(*,'(2A)') 'ERROR, rotax_to_cartesian called for non-rotation operation ',&
@@ -1544,9 +1598,9 @@ end function rotax_to_cartesian
 function refplane_to_cartesian(atom,op,rx,ry)
     implicit none
     integer :: i,j,k,atom,op ! op is index in array "allSymOps"
-    real(8), dimension(3) :: xax,yax,refplane_to_cartesian
-    real(8) :: rx,ry
-    real(8) :: small=1.D-6
+    real(rp), dimension(3) :: xax,yax,refplane_to_cartesian
+    real(rp) :: rx,ry
+    real(rp) :: small=1.D-6
 
     if(allSymOps(op)%typ.ne.'ref')then
       call throw_error('ERROR, refplane_to_cartesian called for non-reflection operation!')
@@ -1595,8 +1649,8 @@ end function refplane_to_cartesian
 function point_to_cartesian(atom,rx,ry,rz)
     implicit none
     integer :: atom
-    real(8), dimension(3) :: point_to_cartesian
-    real(8) :: rx,ry,rz
+    real(rp), dimension(3) :: point_to_cartesian
+    real(rp) :: rx,ry,rz
 
     point_to_cartesian(1) = atom_pos(atom,1)+rx
     point_to_cartesian(2) = atom_pos(atom,2)+ry
@@ -1610,16 +1664,19 @@ end function point_to_cartesian
 subroutine sym_map_sea_q_coords(sol,mapsol,atm1,atm2,num_charges)
     implicit none
     integer :: atm1,atm2,num_charges
-    real(8), dimension(:) :: sol,mapsol
+    real(rp), dimension(:) :: sol,mapsol
     integer :: i,j
-    real(8), dimension(3) :: tpos
+    real(rp), dimension(3) :: tpos
 
     if(atom_sea(sea_ops(atm2,1),1).ne.atm1) call throw_error('sea mismatch in sym_map_sea_q_coords')
     do i=1,num_charges*4-3,4
       tpos=sol(i:i+2)-atom_com !translate back to com coords
-      do j=1,sea_ops(atm2,3)
+      do j=1,sea_ops(atm2,4)
         tpos=matmul(tpos(:),allSymOps(sea_ops(atm2,2))%M) !transform charge coords
       enddo
+      if(sea_ops(atm2,3).ne.0)then
+        tpos=matmul(tpos(:),allSymOps(sea_ops(atm2,3))%M) !transform charge coords
+      endif
       tpos=tpos+atom_com !back to global coords
       mapsol(i:i+2)=tpos
       if(i<num_charges*4-3) mapsol(i+3)=sol(i+3)
@@ -1644,8 +1701,8 @@ subroutine get_chgs_spawned(a)
     implicit none
     integer :: a
     integer :: tnum_spawned,op,i,j
-    real(8), dimension(3) :: tpos
-    real(8) :: r,rx,ry,rz
+    real(rp), dimension(3) :: tpos
+    real(rp) :: r,rx,ry,rz
     
     if(.not.allocated(num_spawned)) allocate(num_spawned(Natom,num_SymOps))
     do i=1,num_atm_sym_ops(a)
@@ -1706,7 +1763,7 @@ function init_atm_sym_search(num_charges,a)
     integer :: num_charges,a
     integer, parameter :: maxtry=200
     integer :: i,cur_charges
-    real(8) :: ran
+    real(rp) :: ran
     logical :: init_atm_sym_search
     integer, dimension(num_charges) :: num_chgs_per_fit_op ! temporary array
 
@@ -1753,8 +1810,8 @@ function init_atm_sym_search(num_charges,a)
       write(*,'(/,2(A,I0),A)') &
         'Fitting sym ops for atom ',a,' with ',num_charges,' charges: '
       do i=1,num_atm_fit_ops(a)
-        write(*,'(3A,I0,A)') '  ',allSymOps(atm_fit_ops(a,i))%label,&
-          ' (',num_chgs_per_fit_op(i),' charges)'
+        write(*,'(3A,I0,A,I0,A)') '  ',allSymOps(atm_fit_ops(a,i))%label,&
+          ' #',atm_fit_ops(a,i),' (',num_chgs_per_fit_op(i),' charges)'
       enddo
       write(*,'(/)')
     endif
@@ -1768,9 +1825,9 @@ subroutine init_sym_search_range(search_range,symFitAtms,num_symFitAtms,&
     implicit none
     integer :: n,i,j,a,num_symFitAtms,sqdim
     integer, dimension(:) :: symFitAtms
-    real(8) :: max_extend,max_charge
+    real(rp) :: max_extend,max_charge
     character(len=3) :: lab
-    real(8), dimension(:,:) :: search_range ! has a minimum and a maximum value for every entry of fitting parameters
+    real(rp), dimension(:,:) :: search_range ! has a minimum and a maximum value for every entry of fitting parameters
     logical :: lasta
 
     n=1
@@ -1839,13 +1896,13 @@ end subroutine init_sym_search_range
 
 !-------------------------------------------------------------------------------
 ! initializes the population to only feasible solutions
-subroutine sym_init_pars(pop,fitAtms,nFitAtms,qatm,scal,radius)
+subroutine sym_init_pars(pop,fitAtms,nFitAtms,qatm,scal,radius,atom_num)
     implicit none
-    real(8), dimension(:), intent(out) :: pop
-    real(8), dimension(3) :: ranvec
-    real(8), dimension(:) :: radius, qatm
-    real(8) :: ran, ranx, rany, scal, f
-    integer, dimension(:) :: fitAtms
+    real(rp), dimension(:), intent(out) :: pop
+    real(rp), dimension(3) :: ranvec
+    real(rp), dimension(:) :: radius, qatm
+    real(rp) :: ran, ranx, rany, scal, f
+    integer, dimension(:) :: fitAtms, atom_num
     integer  :: i,d,l,op,atm,nFitAtms
     logical :: lasta ! last atom?
 
@@ -1862,7 +1919,7 @@ subroutine sym_init_pars(pop,fitAtms,nFitAtms,qatm,scal,radius)
           ! draw a random scaling factor and scale distance along axis
           call random_number(ranx)
           ranx=2.d0*(ranx-0.5d0)
-          ranx = ranx*scal*radius(atm)
+          ranx = ranx*scal*radius(atom_num(atm))
           ! set charge position
           pop(l) = ranx
           l=l+1
@@ -1884,8 +1941,8 @@ subroutine sym_init_pars(pop,fitAtms,nFitAtms,qatm,scal,radius)
   
           ! draw a random scaling factor and scale vector
           call random_number(ran)
-          ranx=ran*scal*radius(atm)*ranx
-          rany=ran*scal*radius(atm)*rany
+          ranx=ran*scal*radius(atom_num(atm))*ranx
+          rany=ran*scal*radius(atom_num(atm))*rany
   
           ! set charge position
           pop(l) = ranx
@@ -1918,7 +1975,7 @@ subroutine sym_init_pars(pop,fitAtms,nFitAtms,qatm,scal,radius)
   
           ! draw a random scaling factor and scale vector
           call random_number(ran)
-          ranvec = ran*scal*radius(atm)*ranvec
+          ranvec = ran*scal*radius(atom_num(atm))*ranvec
   
           ! set charge position
           pop(l:l+2) = ranvec
@@ -1953,8 +2010,8 @@ subroutine sym_init_fit_ops(symFitAtms,num_symFitAtms,best_symatm_combo,num_char
 
     if(allocated(num_atm_fit_ops)) deallocate(num_atm_fit_ops)
     if(allocated(atm_fit_ops)) deallocate(atm_fit_ops)
-    allocate(num_atm_fit_ops(num_symFitAtms))
-    allocate(atm_fit_ops(num_symFitAtms,num_charges))
+    allocate(num_atm_fit_ops(Natom))
+    allocate(atm_fit_ops(Natom,num_charges))
 
     do i=1,num_symFitAtms
       atm=symFitAtms(i)
@@ -1962,9 +2019,9 @@ subroutine sym_init_fit_ops(symFitAtms,num_symFitAtms,best_symatm_combo,num_char
       if(nchg.eq.0)then
         num_atm_fit_ops(atm)=0
       else
-        num_atm_fit_ops(atm)=num_sym_solution_ops(nchg,i)
+        num_atm_fit_ops(atm)=num_sym_solution_ops(nchg,atm)
         atm_fit_ops(atm,1:num_atm_fit_ops(atm))=&
-                         sym_solution_ops(nchg,i,1:num_atm_fit_ops(atm))
+                         sym_solution_ops(nchg,atm,1:num_atm_fit_ops(atm))
       endif
     enddo
 
@@ -1979,17 +2036,17 @@ subroutine spawn_sym_chgs(sqin,q,nq,symFitAtms,num_symFitAtms,total_charge,&
     implicit none
     integer :: atm,atm1,atm2,nq,npts,num_symFitAtms
     integer, dimension(:) :: symFitAtms
-    real(8), dimension(:) :: sqin ! input charges
+    real(rp), dimension(:) :: sqin ! input charges
     integer, dimension(num_symFitAtms) :: num_atm_chgs,n1
     integer, dimension(nq) :: corr_chgs ! hold q() indices of charges to correct in order to maintain total charge
-    integer :: a,b,i,j,k,l,n,op,nlast,tlast,nn
+    integer :: a,b,i,j,k,l,n,op,nlast,tlast,nn,t
     logical :: replicate_atoms !whether to replicate charges to other sea's
-    real(8) :: chg,chg_corr,total_charge,local_charge
-    real(8), dimension(size(sqin,dim=1)+1) :: tqin    ! sqin with additional empty charge
-    real(8), dimension(nq*4) :: tq    ! output: spawned charge array in global axis
-    real(8), dimension(:) :: q    ! output: spawned charge array in global axis
-    real(8), dimension(3) :: pt,tpos
-    real(8), dimension(nq,3) :: sym_pts ! hold points generated by sym ops
+    real(rp) :: chg,chg_corr,total_charge,local_charge
+    real(rp), dimension(size(sqin,dim=1)+1) :: tqin    ! sqin with additional empty charge
+    real(rp), dimension(nq*4) :: tq    ! output: spawned charge array in global axis
+    real(rp), dimension(:) :: q    ! output: spawned charge array in global axis
+    real(rp), dimension(3) :: pt,tpos
+    real(rp), dimension(nq,3) :: sym_pts ! hold points generated by sym ops
 
     tqin(1:size(sqin,dim=1))=sqin(:)
     tqin(size(sqin,dim=1)+1)=0.D0 ! add empty charge to end of fitting parameter array
@@ -2081,9 +2138,12 @@ subroutine spawn_sym_chgs(sqin,q,nq,symFitAtms,num_symFitAtms,total_charge,&
           do i=1,num_atm_chgs(a)
             nn=n1(a)+4*i-3
             tpos=tq(nn:nn+2)
-            do j=1,sea_ops(atm2,3)
+            do j=1,sea_ops(atm2,4)
               tpos=matmul(tpos(:),allSymOps(sea_ops(atm2,2))%M) !transform charge coords
             enddo
+            if(sea_ops(atm2,3).ne.0)then
+              tpos=matmul(tpos(:),allSymOps(sea_ops(atm2,3))%M) !transform charge coords
+            endif
             n=n+1
             tq(n*4-3:n*4-1)=tpos(:)
             tq(n*4)=tq(nn+3)
@@ -2122,12 +2182,12 @@ subroutine apply_atm_sym_ops(atom,pt,sym_pts,npts)
     implicit none
  
     integer :: atom,npts
-    real(8), dimension(:) :: pt
-    real(8), dimension(:,:) :: sym_pts
+    real(rp), dimension(:) :: pt
+    real(rp), dimension(:,:) :: sym_pts
 
-    integer :: i,j,k,l,op
+    integer :: i,j,k,l,op,t
     logical :: duplicate
-    real(8), dimension(3) :: tpos
+    real(rp), dimension(3) :: tpos
 
     npts=1
     sym_pts(1,1:3)=pt(:)
@@ -2167,7 +2227,7 @@ character(len=4) :: label
 character(len=3) :: typ
 integer, dimension(:,:) :: num_sym_solution_ops
 integer, dimension(:,:,:) :: sym_solution_ops
-real(8), dimension(:) :: solutions
+real(rp), dimension(:) :: solutions
 
 read_sym_file=.false.
 sqdim=0
@@ -2243,7 +2303,7 @@ subroutine write_sym_file(charges,a,nchg,filename)
 implicit none
 integer :: ios,i,l,op,nchg
 integer, optional :: a
-real(8), dimension(:), intent(in) :: charges
+real(rp), dimension(:), intent(in) :: charges
 character(len=*), intent(in), optional :: filename
 character(len=1024) :: outfile, dummy, prefix = ''
 
@@ -2325,8 +2385,8 @@ end function getNumSymOps
 ! returns the inversion matrix
 function inversion()
     implicit none
-    real(8), dimension(3,3), parameter  :: inv = reshape((/ -1, 0, 0, 0, -1, 0, 0, 0, -1/), (/3,3/))
-    real(8), dimension(3,3) :: inversion
+    real(rp), dimension(3,3), parameter  :: inv = reshape((/ -1, 0, 0, 0, -1, 0, 0, 0, -1/), (/3,3/))
+    real(rp), dimension(3,3) :: inversion
     inversion = inv
 end function inversion
 !-------------------------------------------------------------------------------
@@ -2335,8 +2395,8 @@ end function inversion
 ! returns the inversion matrix
 function identity()
     implicit none
-    real(8), dimension(3,3), parameter  :: ide = reshape((/ 1, 0, 0, 0, 1, 0, 0, 0, 1/), (/3,3/))
-    real(8), dimension(3,3) :: identity
+    real(rp), dimension(3,3), parameter  :: ide = reshape((/ 1, 0, 0, 0, 1, 0, 0, 0, 1/), (/3,3/))
+    real(rp), dimension(3,3) :: identity
     identity = ide
 end function identity
 !-------------------------------------------------------------------------------
@@ -2345,9 +2405,9 @@ end function identity
 ! returns the reflection matrix for a plane defined by the normalized normal vector n
 function reflection(n)
     implicit none
-    real(8), parameter :: pi = acos(-1d0)
-    real(8), dimension(3,3)           :: reflection !output rotation matrix
-    real(8), dimension(3), intent(in) :: n     ! normalized normal vector
+    real(rp), parameter :: pi = acos(-1d0)
+    real(rp), dimension(3,3)           :: reflection !output rotation matrix
+    real(rp), dimension(3), intent(in) :: n     ! normalized normal vector
     integer :: i
     do i = 1,3
         reflection(i,i) = 1d0-2d0*n(i)**2
@@ -2366,9 +2426,9 @@ end function reflection
 ! returns the improper rotation matrix around the normalized vector "axis" by angle "alpha"
 function improper(axis,alpha,n)
     implicit none
-    real(8), dimension(3,3)    :: improper
-    real(8), dimension(3), intent(in) :: axis  ! rotation axis
-    real(8), optional,     intent(in) :: alpha ! rotation angle
+    real(rp), dimension(3,3)    :: improper
+    real(rp), dimension(3), intent(in) :: axis  ! rotation axis
+    real(rp), optional,     intent(in) :: alpha ! rotation angle
     integer, optional,     intent(in) :: n     ! to directly specify a "Cn" rotation 
     if(present(alpha).and..not.present(n)) then
         improper = matmul(rotation(axis, alpha = alpha),reflection(axis))
@@ -2387,12 +2447,12 @@ end function improper
 ! returns the rotation matrix around the normalized vector "axis" by angle "alpha"
 function rotation(axis,alpha,n)
     implicit none
-    real(8), parameter :: pi = acos(-1d0)
-    real(8), dimension(3,3)           :: rotation !output rotation matrix
-    real(8), dimension(3), intent(in) :: axis  ! rotation axis
-    real(8), optional,     intent(in) :: alpha ! rotation angle
+    real(rp), parameter :: pi = acos(-1d0)
+    real(rp), dimension(3,3)           :: rotation !output rotation matrix
+    real(rp), dimension(3), intent(in) :: axis  ! rotation axis
+    real(rp), optional,     intent(in) :: alpha ! rotation angle
     integer, optional,     intent(in) :: n     ! to directly specify a "Cn" rotation
-    real(8) :: tmp, tmp2, cosine, sine
+    real(rp) :: tmp, tmp2, cosine, sine
     integer :: i,j
     if(present(alpha).and..not.present(n)) then
         cosine = cos(alpha)

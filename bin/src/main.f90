@@ -9,15 +9,18 @@
 program cubefit
 use differential_evolution
 use symmetry
+#ifdef GPU
+use rmse_gpu
+#endif
 implicit none
 
 real(rp), parameter :: bohr2angstrom      = 0.52917721067_rp
 real(rp), parameter :: angstrom2bohr      = 1._rp/bohr2angstrom
 real(rp), parameter :: hartree2kcal       = 627.509_rp
-real(rp), parameter :: vbig               = 1.e99_rp ! huge() not working well
+real(rp),save :: vbig          = 1.e99_rp ! huge() not working well
 !https://de.wikipedia.org/wiki/Van-der-Waals-Radius
-real(rp), parameter :: vdW_scaling = 1.0_rp/3.0_rp ! r must be smaller than scaling*vdW_radius to be feasible
-real(rp), dimension(55), parameter :: vdW_radius = (/ &
+real(rp),save :: vdW_scaling   = 1.0_rp/3.0_rp ! r must be smaller than scaling*vdW_radius to be feasible
+real(rp),save, dimension(55) :: vdW_radius = (/ &
                                      1.20_rp*angstrom2bohr, & ! H
                                      1.40_rp*angstrom2bohr, & ! He
                                      1.82_rp*angstrom2bohr, & ! Li
@@ -77,10 +80,11 @@ real(rp), dimension(55), parameter :: vdW_radius = (/ &
 
 ! program parameters
 logical  :: verbose           = .false. ! toggles printing mode
+logical,save  :: gpu          = .false. ! toggles using gpu routines
 logical  :: use_greedy_fit    = .false. ! greedily fit individual multipoles first
 logical  :: greedy_only_multi = .false. ! stops greedy fit after fitting atomic multipoles
 logical  :: simplex_only      = .false. ! perform only simplex refinement, no D.E.
-logical  :: use_symmetry      = .false. ! toggles symmetry constraint mode
+logical,save  :: use_symmetry = .false. ! toggles symmetry constraint mode
 logical  :: fit_multipoles    = .false. ! fit multipoles instead of charges
 logical  :: generate_atomic   = .false. ! for visualizing charge fits
 logical  :: refine_solution   = .false. ! when used to refine a solution
@@ -88,13 +92,13 @@ integer, parameter :: lmax    = 5       ! where is the multipole expansion trunc
 integer  :: lstart            = 0       ! where do we start the fitting of the multipole expansion?
 integer  :: lstop             = lmax    ! where do we start the fitting of the multipole expansion?
 integer  :: lcur              = 0       ! where is the multipole expansion truncated? maximum = 5!
-integer  :: num_charges       = 1       ! how many charges to fit (current)
+integer,save  :: num_charges  = 1       ! how many charges to fit (current)
 integer  :: num_charges_min   = 2       ! maximum number of charges to fit
 integer  :: num_charges_max   = 2       ! maximum number of charges to fit
 integer  :: num_charges_min_multipole = 1 
 integer  :: num_charges_max_multipole = 5
 integer  :: num_trials        = 1       ! maximum number of trials per number of charges
-real(rp) :: total_charge      = 0._rp   ! total charge
+real(rp),save :: total_charge = 0._rp   ! total charge
 real(rp) :: total_charge2     = 0._rp   ! total charge
 real(rp) :: max_charge        = 1._rp  ! maximum allowed absolute value of a charge (in search range)
 real(rp) :: max_extend        = 5._rp   ! gets calculated automatically from vdW radii
@@ -123,20 +127,22 @@ real(rp) :: density_grid_max_cutoff = 2.0e-3 ! 1.0e-3_rp !density larger than th
 
 
 ! information about the ESP
-integer :: Natom ! number of atoms
+integer,save :: Natom ! number of atoms
 real(rp), dimension(3)                :: origin, axisX, axisY, axisZ   ! coordinate system of grid
-integer                               :: NgridX, NgridY, NgridZ, Ngrid ! number of grid points in each direction
-real(rp)                              :: Ngridr                        ! total number of grid points as real (for mean etc.)
-real(rp), dimension(:),   allocatable :: esp_grid, esp_grid2           ! values of the electrostatic potential
-real(rp), dimension(:,:), allocatable :: gridval                       ! stores at which gridpoints the ESP is interesting (outside atoms)
-integer,  dimension(:),   allocatable :: atom_num                      ! stores the atomic numbers of the atoms
-real(rp), dimension(:,:), allocatable :: atom_pos                      ! stores the atomic positions 
+integer,save                          :: NgridX, NgridY, NgridZ, Ngrid ! number of grid points in each direction
+real(rp),save                         :: Ngridr                        ! total number of grid points as real (for mean etc.)
+real(rp),save, dimension(:),   allocatable :: esp_grid, esp_grid2      ! values of the electrostatic potential
+real(rp),save, dimension(:,:), allocatable :: gridval                  ! stores at which gridpoints the ESP is interesting (outside atoms)
+real,save, dimension(:),   allocatable :: esp_grid_sp                  ! values of the electrostatic potential
+real,save, dimension(:,:), allocatable :: gridval_sp                   ! stores at which gridpoints the ESP is interesting (outside atoms)
+integer,save, dimension(:),   allocatable :: atom_num                      ! stores the atomic numbers of the atoms
+real(rp),save, dimension(:,:), allocatable :: atom_pos                      ! stores the atomic positions 
 real(rp), dimension(3)                :: atom_com                      ! stores the atomic center of mass (for checking charge symmetry)
 real(rp), dimension(:), allocatable :: multipole                       ! stores multipole parameters
 
 real(rp), dimension(:,:,:), allocatable :: multipole_solutions         ! stores charge positions for the multipole fits (num_charges_max_multipole*4,num_charges_max_multipole,Natom)
 real(rp), dimension(:), allocatable :: mapsol                          ! temporary charge array
-real(rp), dimension(:,:,:), allocatable :: sym_multipole_solutions     ! stores charge positions for the multipole fits with symmetry constraints (num_charges_max_multipole*4,num_charges_max_multipole,Natom)
+real(rp), dimension(:,:,:), allocatable, save :: sym_multipole_solutions     ! stores charge positions for the multipole fits with symmetry constraints (num_charges_max_multipole*4,num_charges_max_multipole,Natom)
 real(rp), dimension(:,:), allocatable   :: multipole_solutions_rmse    ! stores RMSE of the multipole solutions (needed for greedy mode)
 integer, dimension(:,:), allocatable    :: num_sym_solution_ops                        ! stores number of symmetry ops for best fit to each number of atomic charges
 integer, dimension(:,:,:), allocatable  :: sym_solution_ops                          ! stores symmetry ops for best fit to each number of atomic charges
@@ -149,11 +155,11 @@ real(rp), dimension(:,:), allocatable :: sliceXY2,sliceXZ2,sliceYZ2    ! cuts al
 logical,  dimension(:,:), allocatable :: usedXY, usedXZ, usedYZ        ! is the grid point at that cut used in the fit?
 
 ! fitting variables
-integer ::  natmfit = 0                               ! defines number of atoms included in fit
-integer,  dimension(:),   allocatable :: fitatoms     ! contains list of atom indices to be fitted
-integer :: fitAtm   ! contains atom currently being fitted to multipolar ESP
-integer ::  num_symFitAtms = 0                        ! defines number of symmetry-unique atoms included in symmetry-constratined fit
-integer,  dimension(:),   allocatable :: symFitAtms   ! contains list of symmetry-unique atom indices to be fitted in symmetry-constrained fit
+integer,save ::  natmfit = 0                               ! defines number of atoms included in fit
+integer,save, dimension(:),   allocatable :: fitatoms     ! contains list of atom indices to be fitted
+integer, save :: fitAtm   ! contains atom currently being fitted to multipolar ESP
+integer, save ::  num_symFitAtms = 0                        ! defines number of symmetry-unique atoms included in symmetry-constratined fit
+integer, save,  dimension(:),   allocatable :: symFitAtms   ! contains list of symmetry-unique atom indices to be fitted in symmetry-constrained fit
 real(rp), dimension(:),   allocatable :: charges      ! contains position (x,y,z) and magnitude (q) of charges
                                                       ! x1: charge(1), y1: charge(2), z1: charge(3), q1: charge(4)
                                                       ! x2: charge(5), ...
@@ -419,11 +425,12 @@ if(use_greedy_fit) then
         a = fitatoms(b)
         flag=0
         do i=1,Natom 
+  
           if(count(atom_sea(i,:) /= 0) == 0) exit
           if(a.eq.atom_sea(i,1)) then
             flag=1
             num_symFitAtms=num_symFitAtms+1
-            symFitAtms(num_symFitAtms)=i
+            symFitAtms(num_symFitAtms)=a
             b=b+1
           endif
         end do
@@ -456,6 +463,7 @@ if(use_greedy_fit) then
     endif ! use_symmetry
 
     write(*,'(A)') "USING GREEDY MODE"
+    flush(6)
     !save the values for the full ESP (individual multipoles will be saved into there)
     if(.not.allocated(esp_grid2)) allocate(esp_grid2(NgridX*NgridY*NgridZ))
     if(.not.allocated(sliceXY2))  allocate(sliceXY2(NgridX,NgridY))
@@ -494,7 +502,10 @@ if(use_greedy_fit) then
         
         !calculate esp grid and slice data for the multipole of atom a
         call calc_multipole_grid_and_slice_data(multipole,a) 
-
+        !copy grid to GPU if using
+#ifdef GPU
+        if(gpu) call gpu_set_ESPgrid(gridval, esp_grid, Ngrid)
+#endif
 !        if(num_charges_max < 5) then
 !            num_charges_max_multipole = num_charges_max
 !        end if
@@ -788,6 +799,10 @@ if(natmfit < Natom.and..not.use_symmetry) then ! some atoms are excluded
   enddo
   if(verbose) write(*,'(A,ES23.9)') "Total fragment charge (a.u.): ",total_charge
 endif
+!copy ESP grid to GPU memory
+#ifdef GPU
+  if(gpu) call gpu_set_ESPgrid(gridval, esp_grid, Ngrid)
+#endif
 
 !refining the solution
 if(refine_solution) then
@@ -1340,7 +1355,16 @@ real(rp) function rmse_qtot(qin)
     end do
     q(1:size(qin,dim=1)) = qin(:)
     q(size(q,dim=1)) = total_charge - qsum
-    rmse_qtot = rmse(q)
+
+#ifdef GPU
+    if(gpu) then
+      rmse_qtot = rmse_gpu(q)
+    else
+#endif
+      rmse_qtot = rmse(q)
+#ifdef GPU
+    endif
+#endif
 end function rmse_qtot
 !-------------------------------------------------------------------------------
 
@@ -1359,7 +1383,15 @@ real(rp) function sym_rmse_qtot(sqin)
 
     call spawn_sym_chgs(sqin,q,num_charges,symFitAtms,num_symFitAtms,total_charge,.true.) ! apply sym ops to sqin to populate q
 
-    sym_rmse_qtot = rmse(q)
+#ifdef GPU
+    if(gpu) then
+      sym_rmse_qtot = rmse_gpu(q)
+    else
+#endif
+      sym_rmse_qtot = rmse(q)
+#ifdef GPU
+    endif
+#endif
 end function sym_rmse_qtot
 !-------------------------------------------------------------------------------
 
@@ -1375,12 +1407,21 @@ real(rp) function sym_atm_rmse_qtot(sqin)
     real(rp), dimension(num_charges*4) :: q   ! complete charges
     real(rp) :: qsum
     integer,dimension(1) :: atms
+
     qsum = 0._rp
 
     atms(1)=fitAtm
     call spawn_sym_chgs(sqin,q,num_charges,atms,1,total_charge,.false.) ! apply sym ops to sqin to populate q
 
-    sym_atm_rmse_qtot = rmse(q)
+#ifdef GPU
+    if(gpu) then
+      sym_atm_rmse_qtot = rmse_gpu(q)
+    else
+#endif
+      sym_atm_rmse_qtot = rmse(q)
+#ifdef GPU
+    endif
+#endif
 end function sym_atm_rmse_qtot
 !-------------------------------------------------------------------------------
 
@@ -1393,6 +1434,7 @@ real(rp) function rmse(q)
     integer :: idx
     rmse = 0._rp
     do idx = 1,Ngrid
+!        rmse = rmse + (coulomb_potential_sp(real(gridval(:,idx)),real(q)) - real(esp_grid(idx)))**2
         rmse = rmse + (coulomb_potential(gridval(:,idx),q) - esp_grid(idx))**2
     end do
     rmse = sqrt(rmse/Ngridr)
@@ -1624,6 +1666,25 @@ real(rp) function coulomb_potential(x,q)
     end do
 end function coulomb_potential
 !-------------------------------------------------------------------------------
+
+!-------------------------------------------------------------------------------
+! computes Coulomb potential for the given charges q at position x (single
+! precision)
+real function coulomb_potential_sp(x,q)
+    implicit none
+    real, dimension(3), intent(in) :: x ! position
+    real, dimension(:) :: q ! charges
+    real :: r
+    integer :: i
+    coulomb_potential_sp = 0.0
+    do i=1,size(q,dim=1),4
+        r = sqrt(sum((q(i:i+2)-x)**2))  ! compute distance
+        if(r < 1.e-9_rp) r = 1.e-9_rp ! prevent division by 0
+        coulomb_potential_sp = coulomb_potential_sp + q(i+3)/r
+    end do
+end function coulomb_potential_sp
+!-------------------------------------------------------------------------------
+
 
 !-------------------------------------------------------------------------------
 ! computes Coulomb potential for the given mutipole expansion at position x, 
@@ -1978,7 +2039,7 @@ subroutine sym_init_pop_multipole(pop)
     ! loop over population
     do p = 1,popSize
       call sym_init_pars(pop(:,p),symFitAtms,num_symFitAtms,multipole,vdW_scaling,&
-           vdW_radius)
+           vdW_radius,atom_num)
     end do
 end subroutine sym_init_pop_multipole
 !-------------------------------------------------------------------------------
@@ -1996,7 +2057,7 @@ subroutine sym_init_pop(pop)
     ! loop over population
     do p = 1,popSize
       call sym_init_pars(pop(:,p),symFitAtms,num_symFitAtms,multipole,vdW_scaling,&
-           vdW_radius)
+           vdW_radius,atom_num)
     end do
 end subroutine sym_init_pop
 !-------------------------------------------------------------------------------
@@ -3475,6 +3536,9 @@ subroutine read_command_line_arguments()
       
         ! read multipole flag (if this is set, multipoles are fitted instead of charges)
         if(arg(1:l) == '-multipole') fit_multipoles = .true.
+
+        ! check for flag to run with GPU-based RMSE routines
+        if(arg(1:l) == '-gpu') gpu = .true.
                 
         ! lstart
         if(arg(1:l) == '-lstart') then
@@ -3631,7 +3695,7 @@ subroutine init_random_seed(seed_number)
     integer, intent(in) :: seed_number
     integer :: i, n, iseed
     integer, dimension(:), allocatable :: seed
-    
+
     if(seed_number == 0) then
         call system_clock(count=iseed)   
     else
@@ -3644,7 +3708,7 @@ subroutine init_random_seed(seed_number)
     seed = iseed + 37 * (/ (i - 1, i = 1, n) /)
     call random_seed(put = seed)
     deallocate(seed)
-    
+
     return
 end subroutine init_random_seed
 !-------------------------------------------------------------------------------

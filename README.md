@@ -1,10 +1,13 @@
-# MDCM
-Machine learning code to fit Minimal Distributed Charge Models (MDCMs)
+# MDCM-2.0
+Machine learning code to fit Minimal Distributed Charge Models (MDCMs) with added
+symmetry constraints and GPU-support
 
 ## Authors:
 MDCM scripts and code by Mike Devereux (Michael.Devereux at unibas.ch) except:
 * **differential_evolution.f90** by Shun Sakuraba
-* **cubefit** original implementation by Oliver Unke, updated and extended by Mike Devereux 
+* **cubefit** original implementation by Oliver Unke, updated and extended by Mike Devereux
+* **symmetry.f90** by Mike Devereux with a contribution from Oliver Unke
+* **rmse_gpu.cuf** by Mike Devereux
 * **punch-to-dcm.f90** original implementation by Shampa Raghunathan, updated by Mike Devereux
 * **mtpfit.py** by Oliver Unke
 
@@ -18,12 +21,15 @@ Additional code required for multipole cube generation example:
 
 ## Code Overview:
 * Various new and pre-existing utilities are combined. The main fitting routines for MDCM charges are located in bin/src and are compiled to produce (p)cubefit.x.
+* CUDA support was added to produce the binary cudacubefit.x
 * The python utility "mtpfit.py" fits high-ranking (*l*=5) atomic multipoles to the molecular electrostatic potential (MEP) across a grid provided in Gaussian cube file format. It also requires a second Gaussian cube file containing the electron density at each corresponding point, in order to define the exclusion zone inside the molecule where points are discarded and the exclusion zone outside a minimum density cut-off where the MEP is typically small.
 * The remaining helper scripts provide utilities to assist with file formats etc. and are used by the examples provided
 
 ## Compilation:
-* Only the MDCM Fortran code requires compilation. Type "make" in the folder that contains the Makefile to create two binaries, *cubefit.x* and *pcubefit.x*. *pcubefit.x* is parallelized using OpenMP, *cubefit.x* is serial code.
-* Note that due to the nature of DE, any speedup using the parallelized code can be small and it is usually better to run more fits simultaneously than a single fit with more cores
+* Only the MDCM Fortran code requires compilation. Type "make serial" or "make parallel" in the folder that contains the Makefile to create two binaries, *cubefit.x* and *pcubefit.x*. *pcubefit.x* is parallelized using OpenMP, *cubefit.x* is serial code.
+* To compile the CUDA code you need to have CUDA-Fortran installed on your computer and in
+your PATH. The make command is then "make cuda".
+* Note that due to the nature of the fitting procedure it is usually better to run more fits simultaneously than a few fits serially using more cores. For very long fits (many charges and / or ESP fitting points in the grid) the GPU code can give noticeable improvements.
 
 ## Running:
 ### mtpfit.py
@@ -49,6 +55,8 @@ Options:
 * -atom: define index of atom to be fitted (corresponds to ordering in cube files). Fitting atoms separately allows efficient parallelization of the fitting process.
 * -ntry: set number of complete fitting runs. As the fitting code involves making random "mutations" to existing populations of candidate solutions, better results may be obtained by repeating the fitting process a few times and selecting the best result
 * -onlymultipoles: state that we want to fit multipole moments only in this step and not atomic charges
+* -sym: state that we want to apply symmetry constraints so that atomic charge models respect the molecular symmetry
+* -gpu: state that we want to run with CUDA support
 * -v: verbose output
 
 **Fragment distributed charge fitting:**
@@ -85,6 +93,8 @@ Options:
 * -dens: define Gaussian cube file "$DCUBE" containing the molecular electron density
 * -nacmax: the highest number of charges per atom used during atom fitting in the atomic charge fitting step
 * -ntry: set number of complete fitting runs. As the fitting code involves making random "mutations" to existing populations of candidate solutions, better results may be obtained by repeating the fitting process a few times and selecting the best result
+* -sym: state that we want to apply symmetry constraints so that atomic charge models respect the molecular symmetry
+* -gpu: state that we want to run with CUDA support
 * -v: verbose output
 
 ## Examples
@@ -111,3 +121,6 @@ The simplest way to use the code for your own system is to adapt one of the exam
 * The example consists of 2 folders
 **esp_gdma_grid** provides a workflow in 1-convert-punch.sh to create a Gaussian format MEP cube file from a GDMA file where both the GDMA file and the reference Gaussian cube files are in the same global axis. The reference Gaussian cube files are used to determine the MEP grid parameters, and the GDMA MEP is compared to the reference cube files after the GDMA multipolar MEP cube file has been generated
 **esp_charmm_grid** provides a similar workflow in 1-convert-pun2lpun.sh and 2-run-charmm.sh to generate an MEP cube file from GDMA multipole moments where the GDMA moments are in a different axis system to the reference cube file data. This is useful for example when checking the performance of GDMA multipole moments from the equilibrium geometry of a molecule in describing the MEP around the molecule in an arbitrary conformation from an MD simulation. To achieve this an axis system transformation is necessary, here we use CHARMM's MTPL module for this purpose. Note that the code requires rdkit to generate the CHARMM-format 'lpun' parameter file. Upon completion the GDMA-derived MEP cube file is again compared to the reference cube file to assess the agreement across different regions of the MEP grid.
+
+### symmetry-constraints
+* This example shows a symmetry-constrained fit for benzene. Fragment fits are not possible here, but the code automatically restricts fitting to symmetry-unique atomic environments only.
