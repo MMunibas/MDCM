@@ -3475,6 +3475,7 @@ subroutine read_command_line_arguments()
           " simplex algorithm rather than D.E. (useful for final refinement with too",&
           " many charges for D.E.)"
         write(*,'(A)') "-sym                 turn on symmetry constrained mode (default is off)"      
+        write(*,'(A)') "-gpu                 run with CUDA support"
         write(*,'(A)') "-v                   verbose output" 
         write(*,*)
         call throw_error("Could not read command line arguments")
