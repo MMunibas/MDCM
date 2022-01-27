@@ -104,6 +104,7 @@ for(my $n=0; $n<=$maxrank; $n++){
       my $j=$t-$n;
       my $at=$a+1;
       $i++;
+      if($mtpl[$a][$i] eq ""){$mtpl[$a][$i]="0.00000000"}
       print OUT "Q$at($n,$j)     $mtpl[$a][$i] \n";
     } 
   }
