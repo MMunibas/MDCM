@@ -28,8 +28,8 @@ end type symmetryOperation
 integer, parameter :: maxOperations = 20000
           
 
-real(rp), save :: tolerance = 0.15d0 !tolerance to consider 2 reals "equal"
-real(rp), save :: tolerance_b = 0.01d0 !percentage tolerance to consider 2 reals "equal"
+real(rp), save :: tolerance = 0.03d0 !tolerance to consider 2 reals "equal" 0.1
+real(rp), save :: tolerance_b = 0.002d0 !percentage tolerance to consider 2 reals "equal" 0.01
 logical, save :: verbose = .true.
 
 integer, save :: Natom ! number of atoms
@@ -238,6 +238,30 @@ subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
             end if
         end if                                     
     end do
+
+    !detect special case of nonlinear triatomic with only Cs symmetry (e.g. SCN-)
+    if(Natom.eq.3 .and..not. (equal(atom_dist(1,2),atom_dist(1,3)).or.equal(  &
+      atom_dist(1,2),atom_dist(2,3)).or.equal(atom_dist(1,3),atom_dist(2,3))) &
+      .and.atom_rotor_type /= LINEAR_TOP)then
+      if(verbose) write(*,'(A)') "Cs nonlinear triatomic detected:"
+      v1 = atom_pos(2,:)-atom_pos(1,:)
+      v2 = atom_pos(3,:)-atom_pos(1,:)
+      !check whether the vectors are colinear
+      axis(1) = v1(2)*v2(3) - v1(3)*v2(2)
+      axis(2) = v1(3)*v2(1) - v1(1)*v2(3)
+      axis(3) = v1(1)*v2(2) - v1(2)*v2(1)
+      if(.not.equal(sum(axis**2),0d0)) then
+        tmp = sqrt(sum(axis**2))
+        axis = axis/tmp
+        tmp_sym_op%M = reflection(axis)
+        tmp_sym_op%typ = "ref"
+        tmp_sym_op%axis  = axis
+        tmp_sym_op%n     = 1
+        write(tmp_sym_op%label,'(A)') "sigh"
+        if(isSymmetryOperation(atom_pos,atom_identifier,tmp_sym_op%M)) &
+            call add_symmetry_operation_to_list(tmp_sym_op,reflections,num_reflections,.true.)
+      end if
+    end if
     
     !this is a rare special case, but it is needed to identify symmetry in some molecules like trans-1,2-dichloroethene
     if(verbose) write(*,'(A)') "Searching other symmetry elements:"
@@ -248,7 +272,7 @@ subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
     end do
     do i = 1,Natom
         if(count(atom_sea(i,:) /= 0) == 0) exit ! no sets left
-        if(count(atom_sea(i,:) /= 0) /= 2) cycle
+        if(count(atom_sea(i,:) /= 0) /= 2) cycle ! only if 2 elements in set
         v2 = atom_pos(atom_sea(i,1),:)-atom_pos(atom_sea(i,2),:)
         !check whether the vectors are colinear
         axis(1) = v1(2)*v2(3) - v1(3)*v2(2)
@@ -289,6 +313,10 @@ subroutine symmetry_init(set_Natom, set_atom_pos, set_atom_identifier)
                 call add_symmetry_operation_to_list(tmp_sym_op,impropers,num_impropers,.true.)
         end if
     end do    
+    do i = 1,Natom
+        if(count(atom_sea(i,:) /= 0) == 0) exit ! no sets left
+
+    end do
     !build a proper list of symmetry operations, also check inversion
     tmp_sym_op%M = inversion()
     tmp_sym_op%axis  = zero

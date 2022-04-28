@@ -82,6 +82,7 @@ real(rp),save, dimension(55) :: vdW_radius = (/ &
 logical  :: verbose           = .false. ! toggles printing mode
 logical,save  :: gpu          = .false. ! toggles using gpu routines
 logical  :: use_greedy_fit    = .false. ! greedily fit individual multipoles first
+logical  :: use_ref_geom      = .false. ! examine a new conformer using local axes
 logical  :: greedy_only_multi = .false. ! stops greedy fit after fitting atomic multipoles
 logical  :: simplex_only      = .false. ! perform only simplex refinement, no D.E.
 logical,save  :: use_symmetry = .false. ! toggles symmetry constraint mode
@@ -109,7 +110,8 @@ character(len=1024) :: input_esp_cubefile = '', &
                        input_xyzfile = '', &
                        input_density_cubefile = '', &
                        prefix = '', &
-                       dummystring = '', dummystring2 = '', dummystring3 = '' ! input files
+                       dummystring = '', dummystring2 = '', dummystring3 = '', & ! input files
+                       ref_cubefile, local_framefile ! for new conformers
 integer :: ppos !for use with scan()
 
 ! other program "modes", only used for analysis or generating cube files at better resolution
@@ -168,6 +170,9 @@ real(rp), dimension(:),   allocatable :: bestcharges  ! best solution found so f
 integer, dimension(:), allocatable   :: best_symatm_combo ! num chgs per atom for best symmetric charge guess
 real(rp), dimension(:,:), allocatable :: search_range ! has a minimum and a maximum value for every entry of charges
 
+! for axis frames
+integer, save, dimension(:,:), allocatable :: frames
+integer, dimension(:), allocatable :: ref_atms ! to store nearest atom to each charge
 
 ! for error handling
 integer :: ios
@@ -279,6 +284,9 @@ if(generate_mode) then
         end if
     else
         call read_xyz_file()
+        if(use_ref_geom)then ! we want to test a conformer than we haven't fitted for
+          call transform_charges_to_new_conf(charges,ref_cubefile)
+        end if
         call write_cube_file(charges)
         ! plot with R
         call write_image_slice_data(charges) !for visualization with R
@@ -1209,6 +1217,348 @@ logical function feasible(q)
     return
 end function feasible
 !-------------------------------------------------------------------------------
+! transforms charges from their original conformer to a new conformer using
+! standard DCM local axes
+subroutine transform_charges_to_new_conf(q,refcube)
+    implicit none
+    real(rp), dimension(:) :: q
+    real(rp), dimension(num_charges,3) :: pos, lpos     !stores all the position
+    real(rp), dimension(Natom,3) :: ref_atm_pos, new_atm_pos
+    integer :: counter
+    character(len=*), intent(in) :: refcube
+
+    !store positions in pos array
+    counter=0
+    do i = 1,size(q,dim=1),4
+        counter = counter + 1
+        pos(counter,1:3) = q(i:i+2) 
+    end do
+
+    call read_axis_frames() !read frame definitions from file
+    call read_coor_from_cube(refcube,ref_atm_pos) !store ref atom coords in array
+    call global_to_local(ref_atm_pos,pos,lpos) !
+
+    do i=1,Natom
+      new_atm_pos(i,1:3) = atom_pos(1:3,i)
+    end do
+
+    call local_to_global(new_atm_pos,lpos,pos)
+
+    !overwrite positions in original charges array
+    counter=0
+    do i = 1,size(q,dim=1),4
+        counter = counter + 1
+        q(i:i+2) = pos(counter,1:3)
+    end do
+
+    if(verbose) then ! print transformed coordinates
+      write(*,*) 
+      write(*,*) 'Transformed charge positions for new conformer:'
+      counter=0
+      do i=1,size(q,dim=1),4
+        counter = counter + 1
+        write(*,*) ' X ',q(i:i+2)*bohr2angstrom
+      end do
+      write(*,*)
+    end if
+
+end subroutine transform_charges_to_new_conf
+!-------------------------------------------------------------------------------
+! reads nuclear positions from cube file and stores in array
+subroutine read_coor_from_cube(refcube,tmp_pos)
+    implicit none
+    real(rp), dimension(:,:) :: tmp_pos
+    character(len=*), intent(in) :: refcube
+    character(len=128) :: ctmp ! dummy character variable
+    integer :: ios ! keeps track of io status
+    integer :: i,itmp
+    real(rp) :: rtmp
+
+    if(verbose) write(*,'(A)') 'Reading coordinates from "'//trim(refcube)//'"...'
+    if(verbose) write(*,*)
+
+    open(30, file=trim(refcube), status= "old", action= "read", iostat = ios)
+    if(ios /= 0) call throw_error('Could not open "'//trim(refcube)//'".')
+
+    ! skip the title in the header
+    read(30,'(A128)',iostat = ios) ctmp
+    if(ios /= 0) call throw_error('Could not read "'//trim(refcube)//'". Bad Format.')
+    if(verbose) write(*,*) trim(ctmp)
+    read(30,'(A128)',iostat = ios) ctmp
+    if(ios /= 0) call throw_error('Could not read "'//trim(refcube)//'". Bad Format.')
+    if(verbose) write(*,*) trim(ctmp) 
+    ! read information about coordinate system and the number of atoms
+    read(30,*,iostat = ios) ctmp
+    if(ios /= 0) call throw_error('Could not read "'//trim(refcube)//'". Missing Header?')
+    read(30,*,iostat = ios) ctmp
+    if(ios /= 0) call throw_error('Could not read "'//trim(refcube)//'". Missing Header?')
+    read(30,*,iostat = ios) ctmp
+    if(ios /= 0) call throw_error('Could not read "'//trim(refcube)//'". Missing Header?')
+    read(30,*,iostat = ios) ctmp
+    if(ios /= 0) call throw_error('Could not read "'//trim(refcube)//'". Missing Header?')
+
+    ! read atom information
+    do i = 1,Natom
+        read(30,*,iostat=ios) itmp, rtmp, tmp_pos(i,1:3)
+        if(ios /= 0) call throw_error('Could not read atom information.')
+        if(verbose) write(*,'(3F12.6)') tmp_pos(i,1:3)
+    end do
+    if(verbose) write(*,*)
+
+    close(30)
+
+end subroutine read_coor_from_cube
+
+!-------------------------------------------------------------------------------
+! converts charge positions in global coordinates to local coordinates
+subroutine global_to_local(ref_atm_pos,pos,lpos)
+    implicit none
+    real(rp), dimension(:,:) :: ref_atm_pos,pos,lpos
+    integer, dimension(Natom) :: atm_frames
+    integer :: i,j,nq,nf
+    integer :: atm1,atm2,atm3
+    real(rp), dimension(3) :: b1,b2,r,rb1,rb2,tpos
+    real(rp), dimension(3) :: ex1,ey1,ez1,ex2,ey2,ez2,ex3,ey3,ez3 !local axes
+    real(rp) :: dx,dy,dz,r2,rmin2
+
+    if(.not.allocated(ref_atms)) allocate(ref_atms(size(pos,dim=1)))
+
+    ! (re)assign charges to nuclei
+    nq=size(pos,dim=1)
+    do i=1,nq
+      dx=pos(i,1)-ref_atm_pos(1,1)
+      dy=pos(i,2)-ref_atm_pos(1,2)
+      dz=pos(i,3)-ref_atm_pos(1,3)
+      rmin2=dx*dx+dy*dy+dz*dz
+      ref_atms(i)=1
+      do j=2,Natom
+        dx=pos(i,1)-ref_atm_pos(j,1)
+        dy=pos(i,2)-ref_atm_pos(j,2)
+        dz=pos(i,3)-ref_atm_pos(j,3)
+        r2=dx*dx+dy*dy+dz*dz
+        if(r2 .lt. rmin2) then
+          rmin2=r2
+          ref_atms(i)=j
+        endif
+      enddo !j
+    enddo !i
+
+    atm_frames(:) = 0
+    nf=size(frames,dim=1)
+    do i=1,nf
+      atm1=frames(i,1)
+      atm2=frames(i,2)
+      atm3=frames(i,3)
+
+      b1=ref_atm_pos(atm1,:)-ref_atm_pos(atm2,:)
+      rb1=norm2(b1)
+      b1=b1/rb1
+      b2=ref_atm_pos(atm3,:)-ref_atm_pos(atm2,:)
+      rb2=norm2(b2)
+      b2=b2/rb2
+
+      ez1=b1 ! local z-axes are along bonds
+      ez2=b1
+      ez3=b2
+
+      ey1=cross(b1,b2) ! local z-axes are orthogonal to plane
+      r=norm2(ey1)
+      ey1=ey1/r
+      ey2=ey1
+      ey3=ey1
+
+      ex1=cross(b1,ey1)
+      r=norm2(ex1)
+      ex1=ex1/r
+      ex2=ex1
+      ex3=cross(b2,ey1)
+      r=norm2(ex3)
+      ex3=ex3/r
+
+      if(atm_frames(atm1) == 0) then
+        atm_frames(atm1)=i
+        do j=1,nq
+          if(ref_atms(j) == atm1) then ! if charge belongs to atm1 of frame
+            tpos=pos(j,:)-ref_atm_pos(atm1,:)
+            lpos(j,1)=dot(tpos,ex1)
+            lpos(j,2)=dot(tpos,ey1)
+            lpos(j,3)=dot(tpos,ez1)
+          end if
+        end do
+      end if
+      if(atm_frames(atm2) == 0) then
+        atm_frames(atm2)=i
+        do j=1,nq
+          if(ref_atms(j) == atm2) then ! if charge belongs to atm2 of frame
+            tpos=pos(j,:)-ref_atm_pos(atm2,:)
+            lpos(j,1)=dot(tpos,ex2)
+            lpos(j,2)=dot(tpos,ey2)
+            lpos(j,3)=dot(tpos,ez2)
+          end if
+        end do
+      end if
+      if(atm_frames(atm3) == 0) then 
+        atm_frames(atm3)=i
+        do j=1,nq
+          if(ref_atms(j) == atm3) then ! if charge belongs to atm3 of frame
+            tpos=pos(j,:)-ref_atm_pos(atm3,:)
+            lpos(j,1)=dot(tpos,ex3)
+            lpos(j,2)=dot(tpos,ey3)
+            lpos(j,3)=dot(tpos,ez3)
+          end if
+        end do
+      end if
+    end do
+
+end subroutine global_to_local
+
+!-------------------------------------------------------------------------------
+! converts charge positions in local coordinates to global coordinates
+subroutine local_to_global(new_atm_pos,lpos,pos)
+    implicit none
+    real(rp), dimension(:,:) :: new_atm_pos,pos,lpos
+    integer, dimension(Natom) :: atm_frames
+    integer :: i,j,nq,nf
+    integer :: atm1,atm2,atm3
+    real(rp), dimension(3) :: b1,b2,r,rb1,rb2,tpos
+    real(rp), dimension(3) :: ex1,ey1,ez1,ex2,ey2,ez2,ex3,ey3,ez3 !local axes
+    real(rp) :: dx,dy,dz,r2,rmin2
+
+    nq=size(lpos,dim=1)
+    nf=size(frames,dim=1)
+    atm_frames(:)=0
+    do i=1,nf
+      atm1=frames(i,1)
+      atm2=frames(i,2)
+      atm3=frames(i,3)
+
+      b1=new_atm_pos(atm1,:)-new_atm_pos(atm2,:)
+      rb1=norm2(b1)
+      b1=b1/rb1
+      b2=new_atm_pos(atm3,:)-new_atm_pos(atm2,:)
+      rb2=norm2(b2)
+      b2=b2/rb2
+
+      ez1=b1 ! local z-axes are along bonds
+      ez2=b1
+      ez3=b2
+
+      ey1=cross(b1,b2) ! local z-axes are orthogonal to plane
+      r=norm2(ey1)
+      ey1=ey1/r
+      ey2=ey1
+      ey3=ey1
+
+      ex1=cross(b1,ey1)
+      r=norm2(ex1)
+      ex1=ex1/r
+      ex2=ex1
+      ex3=cross(b2,ey1)
+      r=norm2(ex3)
+      ex3=ex3/r
+
+      pos(:,:)=0.d0
+
+      if(atm_frames(atm1) == 0) then
+        atm_frames(atm1)=i
+        do j=1,nq
+          if(ref_atms(j) == atm1) then ! if charge belongs to atm1 of frame
+            pos(j,1)=new_atm_pos(atm1,1) + lpos(j,1)*ex1(1) + lpos(j,2)*ey1(1) + &
+                     lpos(j,3)*ez1(1)
+            pos(j,2)=new_atm_pos(atm1,2) + lpos(j,1)*ex1(2) + lpos(j,2)*ey1(2) + &
+                     lpos(j,3)*ez1(2)
+            pos(j,3)=new_atm_pos(atm1,3) + lpos(j,1)*ex1(3) + lpos(j,2)*ey1(3) + &
+                     lpos(j,3)*ez1(3)
+          end if
+        end do
+      end if
+      if(atm_frames(atm2) == 0) then
+        atm_frames(atm2)=i
+        do j=1,nq
+          if(ref_atms(j) == atm2) then ! if charge belongs to atm1 of frame
+            pos(j,1)=new_atm_pos(atm2,1) + lpos(j,1)*ex2(1) + lpos(j,2)*ey2(1) + &
+                     lpos(j,3)*ez2(1)
+            pos(j,2)=new_atm_pos(atm2,2) + lpos(j,1)*ex2(2) + lpos(j,2)*ey2(2) + &
+                     lpos(j,3)*ez2(2)
+            pos(j,3)=new_atm_pos(atm2,3) + lpos(j,1)*ex2(3) + lpos(j,2)*ey2(3) + &
+                     lpos(j,3)*ez2(3)
+          end if
+        end do
+      end if
+      if(atm_frames(atm3) == 0) then
+        atm_frames(atm3)=i
+        do j=1,nq
+          if(ref_atms(j) == atm3) then ! if charge belongs to atm1 of frame
+            pos(j,1)=new_atm_pos(atm3,1) + lpos(j,1)*ex3(1) + lpos(j,2)*ey3(1) + &
+                     lpos(j,3)*ez3(1)
+            pos(j,2)=new_atm_pos(atm3,2) + lpos(j,1)*ex3(2) + lpos(j,2)*ey3(2) + &
+                     lpos(j,3)*ez3(2)
+            pos(j,3)=new_atm_pos(atm3,3) + lpos(j,1)*ex3(3) + lpos(j,2)*ey3(3) + &
+                     lpos(j,3)*ez3(3)
+          end if
+        end do
+      end if
+    end do
+
+end subroutine local_to_global
+
+!-------------------------------------------------------------------------------
+! reads frames file for DCM local axis frame definitions
+subroutine read_axis_frames()
+    implicit none
+    integer, dimension(Natom,3) :: tframes
+    integer :: nf,i,ios
+    character(len=1024) :: dummy
+    real(rp) :: tmp
+
+    open(30, file=trim(local_framefile), status="old", action="read", iostat = ios)
+    if(ios /= 0) call throw_error('Could not open "'//trim(local_framefile)//'" for reading')
+
+    nf=0
+    read(30,*,iostat=ios) dummy !first line is residue type, not needed
+    do
+      read(30,'(A)',end=999) dummy
+      if(dummy.ne.'')then
+        backspace(30)
+        nf=nf+1
+        read(30,*) tframes(nf,1:3)
+      else
+        exit
+      end if
+    end do
+    999 continue
+
+    if(allocated(frames)) deallocate(frames)
+    allocate(frames(nf,3))
+
+    if(verbose) write(*,'(A)') 'Read frames:'
+    do i=1,nf
+      write(*,'(3I4)'),tframes(i,1:3)
+      frames(i,1:3) = tframes(i,1:3)
+    enddo
+    if(verbose) write(*,*)
+    
+end subroutine read_axis_frames
+
+!!-------------------------------------------------------------------------------
+! evaluate a cross product
+function cross(a, b)
+  real(rp), dimension(3) :: cross
+  real(rp), dimension(3), intent(in) :: a, b
+
+  cross(1) = a(2) * b(3) - a(3) * b(2)
+  cross(2) = a(3) * b(1) - a(1) * b(3)
+  cross(3) = a(1) * b(2) - a(2) * b(1)
+end function cross
+
+!!-------------------------------------------------------------------------------
+! evaluate a scalar product
+function dot(a, b)
+  real(rp) :: dot
+  real(rp), dimension(3), intent(in) :: a, b
+
+  dot = a(1) * b(1) + a(2) * b(2) + a(3) * b(3)
+end function dot
 
 !!-------------------------------------------------------------------------------
 !! checks whether the input charges are symmetric
@@ -3425,14 +3775,17 @@ subroutine read_command_line_arguments()
         write(*,'(A)',advance='no') "./"
         !$ write(*,'(A)',advance='no') "p"
         write(*,'(A)') "cubefit.x -generate [-multipole] [-ofatoms] -esp <filepath> -dens <filepath>"//&
-                       " -xyz <filepath> [-prefix <string>] [-v]"
+                       " -xyz <filepath> [-prefix <string>] [-refcube <filepath>] [-v]"
         write(*,*)
         write(*,'(A)') "-multipole           if present, expects multipole input, else expects charge input" 
         write(*,'(A)') "-ofatoms             if present, visualizes charge fits to individual atomic multipoles instead"
         write(*,'(A)') "-esp     <string>    filepath of the cube file containing the desired output format" 
         write(*,'(A)') "-dens    <string>    filepath of the cube file containing the density data" 
         write(*,'(A)') "-xyz     <string>    filepath of the file containing the charges/multipoles from which to generate cubefile"  
-        write(*,'(A)') "-prefix  <string>    identifier prefix for output files"      
+        write(*,'(A)') "-prefix  <string>    identifier prefix for output files"
+        write(*,'(A)') "-refcube <cube> <frame>  if the requested ESP grid represents a different conformer to that used"
+        write(*,'(A)') "                     for fitting, specify a cube file with the original conformer and a local"
+        write(*,'(A)') "                     frame definition file as well"
         write(*,'(A)') "-v                   verbose output" 
         write(*,*)
         write(*,'(A)') "When running in multipole fitting mode"
@@ -3637,6 +3990,16 @@ subroutine read_command_line_arguments()
             read(arg,'(A)',iostat = ios) input_multipolefile
             if(ios /= 0) call throw_error('Could not read command line argument "-greedy"')
         end if
+
+        ! reference conformer files if we examine performance for a new conformer
+        if(arg(1:l) == '-refcube') then
+            use_ref_geom = .true.
+            call get_command_argument(i+1, arg, l)
+            read(arg,'(A)',iostat = ios) ref_cubefile
+            if(ios /= 0) call throw_error('Could not read command line argument "-refcube"')
+            call get_command_argument(i+2, arg, l)
+            read(arg,'(A)',iostat = ios) local_framefile
+        end if
         
         ! prefix file identifier
         if(arg(1:l) == '-prefix') then
@@ -3649,6 +4012,10 @@ subroutine read_command_line_arguments()
     
     if(analysis_mode.and.generate_mode) then
         call throw_error('Only one flag allowed: either "-analysis" or "-generate"')
+    end if
+
+    if(use_ref_geom.and.(.not.generate_mode.or.fit_multipoles)) then
+        call throw_error('new conformers are only allowed in generate mode and for charge fits (-generate)')
     end if
 
     if(use_symmetry.and.fit_multipoles) then
