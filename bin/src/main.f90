@@ -2,8 +2,7 @@
 !
 !      main.f90
 !      Created: 9 May 2016 at 09:54
-!      Author: Oliver Unke
-!      Updated and extended by Mike Devereux
+!      Authors: Oliver Unke and Mike Devereux
 !
 !///////////////////////////////////////////////////////////////////////////////
 program cubefit
@@ -82,7 +81,6 @@ real(rp),save, dimension(55) :: vdW_radius = (/ &
 logical  :: verbose           = .false. ! toggles printing mode
 logical,save  :: gpu          = .false. ! toggles using gpu routines
 logical  :: use_greedy_fit    = .false. ! greedily fit individual multipoles first
-logical  :: use_ref_geom      = .false. ! examine a new conformer using local axes
 logical  :: greedy_only_multi = .false. ! stops greedy fit after fitting atomic multipoles
 logical  :: simplex_only      = .false. ! perform only simplex refinement, no D.E.
 logical,save  :: use_symmetry = .false. ! toggles symmetry constraint mode
@@ -90,6 +88,7 @@ logical  :: fit_multipoles    = .false. ! fit multipoles instead of charges
 logical  :: generate_atomic   = .false. ! for visualizing charge fits
 logical  :: refine_solution   = .false. ! when used to refine a solution
 integer, parameter :: lmax    = 5       ! where is the multipole expansion truncated? maximum = 5!
+integer, parameter :: MAXCONF = 100     ! maximum number of conformers allowed
 integer  :: lstart            = 0       ! where do we start the fitting of the multipole expansion?
 integer  :: lstop             = lmax    ! where do we start the fitting of the multipole expansion?
 integer  :: lcur              = 0       ! where is the multipole expansion truncated? maximum = 5!
@@ -104,14 +103,14 @@ real(rp) :: total_charge2     = 0._rp   ! total charge
 real(rp) :: max_charge        = 1._rp  ! maximum allowed absolute value of a charge (in search range)
 real(rp) :: max_extend        = 5._rp   ! gets calculated automatically from vdW radii
 
-character(len=1024) :: input_esp_cubefile = '', &
-                       compare_esp_cubefile = '', &
+character(len=1024) :: input_esp_cubefile(MAXCONF), input_density_cubefile(MAXCONF)
+
+character(len=1024) :: compare_esp_cubefile = '', &
                        input_multipolefile = '', &
                        input_xyzfile = '', &
-                       input_density_cubefile = '', &
                        prefix = '', &
                        dummystring = '', dummystring2 = '', dummystring3 = '', & ! input files
-                       ref_cubefile, local_framefile ! for new conformers
+                       local_framefile = '' ! for new conformers
 integer :: ppos !for use with scan()
 
 ! other program "modes", only used for analysis or generating cube files at better resolution
@@ -130,15 +129,18 @@ real(rp) :: density_grid_max_cutoff = 2.0e-3 ! 1.0e-3_rp !density larger than th
 
 ! information about the ESP
 integer,save :: Natom ! number of atoms
-real(rp), dimension(3)                :: origin, axisX, axisY, axisZ   ! coordinate system of grid
-integer,save                          :: NgridX, NgridY, NgridZ, Ngrid ! number of grid points in each direction
-real(rp),save                         :: Ngridr                        ! total number of grid points as real (for mean etc.)
-real(rp),save, dimension(:),   allocatable :: esp_grid, esp_grid2      ! values of the electrostatic potential
-real(rp),save, dimension(:,:), allocatable :: gridval                  ! stores at which gridpoints the ESP is interesting (outside atoms)
+real(rp), dimension(:,:), allocatable :: origin, axisX, axisY, axisZ   ! coordinate system of grid
+integer,save, dimension(:), allocatable :: NgridX, NgridY, NgridZ      ! number of grid points in each direction
+integer,save                            :: NgridrTot                   ! total number of grid points over all conformers
+integer,save, dimension(:), allocatable :: Ngrid                       ! total number of grid points per conformer (for mean etc.)
+real(rp),save, dimension(:), allocatable :: Ngridr                     ! total number of grid points as real (for mean etc.)
+real(rp),save, dimension(:,:),   allocatable :: esp_grid               ! values of the electrostatic potential
+real(rp),save, dimension(:),   allocatable ::  esp_grid2               ! values of the electrostatic potential
+real(rp),save, dimension(:,:,:), allocatable :: gridval                ! stores at which gridpoints the ESP is interesting (outside atoms)
 real,save, dimension(:),   allocatable :: esp_grid_sp                  ! values of the electrostatic potential
 real,save, dimension(:,:), allocatable :: gridval_sp                   ! stores at which gridpoints the ESP is interesting (outside atoms)
-integer,save, dimension(:),   allocatable :: atom_num                      ! stores the atomic numbers of the atoms
-real(rp),save, dimension(:,:), allocatable :: atom_pos                      ! stores the atomic positions 
+integer,save, dimension(:),   allocatable :: atom_num                  ! stores the atomic numbers of the atoms
+real(rp),save, dimension(:,:,:), allocatable :: atom_pos               ! stores the atomic positions 
 real(rp), dimension(3)                :: atom_com                      ! stores the atomic center of mass (for checking charge symmetry)
 real(rp), dimension(:), allocatable :: multipole                       ! stores multipole parameters
 
@@ -152,17 +154,20 @@ real(rp), dimension(:), allocatable :: multipole_best, multipole_save  ! current
 !real(rp), dimension(:,:,:), allocatable, save :: symmetry_ops          ! stores the symmetry operations in matrix form
 
 ! these are only used for visualizing the grid with R in the end
-real(rp), dimension(:,:), allocatable :: sliceXY,sliceXZ,sliceYZ       ! cuts along planes
-real(rp), dimension(:,:), allocatable :: sliceXY2,sliceXZ2,sliceYZ2    ! cuts along planes
-logical,  dimension(:,:), allocatable :: usedXY, usedXZ, usedYZ        ! is the grid point at that cut used in the fit?
+real(rp), dimension(:,:,:), allocatable :: sliceXY,sliceXZ,sliceYZ       ! cuts along planes
+real(rp), dimension(:,:,:), allocatable :: sliceXY2,sliceXZ2,sliceYZ2    ! cuts along planes
+logical,  dimension(:,:,:), allocatable :: usedXY, usedXZ, usedYZ        ! is the grid point at that cut used in the fit?
+logical,  dimension(:,:,:), allocatable :: usedXY2, usedXZ2, usedYZ2        ! is the grid point at that cut used in the fit?
 
 ! fitting variables
 integer,save ::  natmfit = 0                               ! defines number of atoms included in fit
+integer,save ::  natmfreeze = 0                            ! defines number of atoms frozen in fit
 integer,save, dimension(:),   allocatable :: fitatoms     ! contains list of atom indices to be fitted
+integer,save, dimension(:),   allocatable :: freezeatoms  ! contains list of atom indices to be frozen during fitting
 integer, save :: fitAtm   ! contains atom currently being fitted to multipolar ESP
 integer, save ::  num_symFitAtms = 0                        ! defines number of symmetry-unique atoms included in symmetry-constratined fit
 integer, save,  dimension(:),   allocatable :: symFitAtms   ! contains list of symmetry-unique atom indices to be fitted in symmetry-constrained fit
-real(rp), dimension(:),   allocatable :: charges      ! contains position (x,y,z) and magnitude (q) of charges
+real(rp), dimension(:),   allocatable :: charges, lcharges ! contains position (x,y,z) and magnitude (q) of charges
                                                       ! x1: charge(1), y1: charge(2), z1: charge(3), q1: charge(4)
                                                       ! x2: charge(5), ...
 real(rp), dimension(:),   allocatable :: sym_charges  ! contains fitted parameters (distances along axes or in symmetry planes) for symmetry-constrained fits
@@ -170,9 +175,13 @@ real(rp), dimension(:),   allocatable :: bestcharges  ! best solution found so f
 integer, dimension(:), allocatable   :: best_symatm_combo ! num chgs per atom for best symmetric charge guess
 real(rp), dimension(:,:), allocatable :: search_range ! has a minimum and a maximum value for every entry of charges
 
-! for axis frames
+! for axis frames and multiple conformers
 integer, save, dimension(:,:), allocatable :: frames
 integer, dimension(:), allocatable :: ref_atms ! to store nearest atom to each charge
+integer :: Nconf ! number of conformers loaded
+integer :: Nframes ! number of local axis frames
+real(rp), dimension(:,:,:), allocatable :: ex1,ey1,ez1,ex2,ey2,ez2,ex3,ey3,ez3 ! local axes
+character(len=2), dimension(:), allocatable :: frametypes ! can be bond or bisector-type local axis frame
 
 ! for error handling
 integer :: ios
@@ -182,6 +191,9 @@ integer :: i,j,k,a,a1,a2,b,try,qdim,sqdim,flag,lcheck !current dimensionality of
 
 real(rp) :: tmp, RMSE_best, RMSE_tmp, MAE_tmp, maxAE_tmp, lrmse_best
 
+! Initialize variables
+Nconf = 0
+NgridrTot = 0
 
 call system("mkdir -p slices")
 
@@ -193,30 +205,54 @@ if(trim(prefix) /= '') then
     call execute_command_line("mkdir -p "//trim(prefix))
 end if 
 
+allocate(Ngrid(Nconf),Ngridr(Nconf),origin(Nconf,3),axisX(Nconf,3),axisY(Nconf,3),&
+         axisZ(Nconf,3),NgridX(Nconf),NgridY(Nconf),NgridZ(Nconf))
+
 ! initialize RNG (for drawing the population)
 call init_random_seed(0)
-! read in the cube file
-call read_cube_file(trim(input_esp_cubefile),trim(input_density_cubefile))
+! read in the cube file(s)
+
+do i=1,Nconf
+  call read_cube_file(trim(input_esp_cubefile(i)),trim(input_density_cubefile(i)),i)
+end do
+
+!read axis frames if we have multiple conformers
+if(Nconf>1) then
+  call read_axis_frames()
+  do i=1,Nconf
+    if(.not.allocated(ex1))then
+      allocate(ex1(Nconf,Nframes,3),ey1(Nconf,Nframes,3),ez1(Nconf,Nframes,3), &
+             ex2(Nconf,Nframes,3),ey2(Nconf,Nframes,3),ez2(Nconf,Nframes,3), &
+             ex3(Nconf,Nframes,3),ey3(Nconf,Nframes,3),ez3(Nconf,Nframes,3))
+    end if
+    call get_local_axes(i,ex1(i,:,:),ey1(i,:,:),ez1(i,:,:),ex2(i,:,:), &
+       ey2(i,:,:),ez2(i,:,:),ex3(i,:,:),ey3(i,:,:),ez3(i,:,:))
+  end do
+end if
 
 ! analysis mode: evaluate quality of fit only
 if(analysis_mode) then
+    if(Nconf > 1)then
+      call throw_error('Sorry, multiple conformers are not yet implemented in analysis mode, please use '&
+       //'-refcube with -generate, then analysis instead')
+    end if
     !save old values
-    if(.not.allocated(esp_grid2)) allocate(esp_grid2(NgridX*NgridY*NgridZ))
-    if(.not.allocated(sliceXY2)) allocate(sliceXY2(NgridX,NgridY))
-    if(.not.allocated(sliceXZ2)) allocate(sliceXZ2(NgridX,NgridZ))
-    if(.not.allocated(sliceYZ2)) allocate(sliceYZ2(NgridY,NgridZ))
+    if(.not.allocated(esp_grid2)) allocate(esp_grid2(NgridX(1)*NgridY(1)*NgridZ(1)))
+    if(.not.allocated(sliceXY2)) allocate(sliceXY2(1,NgridX(1),NgridY(1)))
+    if(.not.allocated(sliceXZ2)) allocate(sliceXZ2(1,NgridX(1),NgridZ(1)))
+    if(.not.allocated(sliceYZ2)) allocate(sliceYZ2(1,NgridY(1),NgridZ(1)))
     sliceXY2 = sliceXY
     sliceXZ2 = sliceXZ
     sliceYZ2 = sliceYZ
-    esp_grid2 = esp_grid
+    esp_grid2 = esp_grid(1,:)
     
     !read in the second esp file
-    call read_cube_file(trim(compare_esp_cubefile),trim(input_density_cubefile))
+    call read_cube_file(trim(compare_esp_cubefile),trim(input_density_cubefile(1)),1)
     call do_analysis(vdw_grid_min_cutoff,vdw_grid_max_cutoff) !calculate all the errors in different regions
     call write_error_cube_file() !writes the difference between true and fittes esp file to a cube file 
     
     ! plot with R
-    call write_image_slice_data_analysis() !for visualization with R
+    call write_image_slice_data_analysis(1) !for visualization with R
 !    call execute_command_line("./visualize.r",wait=.true.)
     if(trim(prefix) /= '') then
         dummystring = trim(prefix)//"/analysis_comparison.png"
@@ -247,7 +283,7 @@ if(generate_mode) then
                     if(trim(prefix) /= '') input_xyzfile  = trim(prefix)//"/"//trim(input_xyzfile)
                     call read_xyz_file()
                     ! plot with R
-                    call write_image_slice_data(charges) !for visualization with R
+                    call write_image_slice_data(charges,1) !for visualization with R
 !                    call execute_command_line("./visualize.r", wait=.true.)
                     dummystring3 = "multipole"//trim(dummystring)//"_"//trim(dummystring2)//"charges_comparison.png"
                     if(trim(prefix) /= '') dummystring3 = trim(prefix)//"/"//trim(dummystring3)
@@ -284,12 +320,24 @@ if(generate_mode) then
         end if
     else
         call read_xyz_file()
-        if(use_ref_geom)then ! we want to test a conformer than we haven't fitted for
-          call transform_charges_to_new_conf(charges,ref_cubefile)
+        if(Nconf>1)then ! we want to test a conformer than we haven't fitted for
+          allocate(lcharges(size(charges,dim=1)))
+          call assign_charges_to_atoms(charges,1)
+          call global_to_local(charges,lcharges,1)
+          call local_to_global(lcharges,charges,2) !tansform charges to conformer 2
+          if(verbose) then
+            write(*,*)
+            write(*,*) 'Transformed charge positions in frame of:'
+            write(*,*) trim(input_esp_cubefile(1))
+            write(*,*) 'to frame of new conformer:'
+            write(*,*) trim(input_esp_cubefile(2))
+            write(*,*) 'writing transformed charge coordinates to conf2.xyz'
+            call write_xyz_file(charges,filename='conf2.xyz')
+          end if
         end if
-        call write_cube_file(charges)
+        call write_cube_file(charges,Nconf)
         ! plot with R
-        call write_image_slice_data(charges) !for visualization with R
+        call write_image_slice_data(charges,Nconf) !for visualization with R
 !        call execute_command_line("./visualize.r",wait=.true.)
         write(dummystring,'(I0)') num_charges 
         if(trim(prefix) /= '') then
@@ -308,8 +356,8 @@ if(use_symmetry) then
         if(verbose) write(*,'(A)')
         if(verbose) write(*,'(A)') "Initializing symmetry module..."
         if(verbose) write(*,'(A)')
-        call symmetry_init(Natom, transpose(atom_pos), real(atom_num(:),rp))
-        atom_com = centerOfMass(transpose(atom_pos))
+        call symmetry_init(Natom, transpose(atom_pos(1,:,:)), real(atom_num(:),rp))
+        atom_com = centerOfMass(transpose(atom_pos(1,:,:)))
 !        if(.not.allocated(symmetry_ops)) allocate(symmetry_ops(3,3,size(unique_ops,dim=1)))
 !        do i = 1,size(unique_ops,dim=1)
 !            symmetry_ops(:,:,i) = unique_ops(i)%M
@@ -473,14 +521,14 @@ if(use_greedy_fit) then
     write(*,'(A)') "USING GREEDY MODE"
     flush(6)
     !save the values for the full ESP (individual multipoles will be saved into there)
-    if(.not.allocated(esp_grid2)) allocate(esp_grid2(NgridX*NgridY*NgridZ))
-    if(.not.allocated(sliceXY2))  allocate(sliceXY2(NgridX,NgridY))
-    if(.not.allocated(sliceXZ2))  allocate(sliceXZ2(NgridX,NgridZ))
-    if(.not.allocated(sliceYZ2))  allocate(sliceYZ2(NgridY,NgridZ))
+    if(.not.allocated(esp_grid2)) allocate(esp_grid2(NgridX(1)*NgridY(1)*NgridZ(1)))
+    if(.not.allocated(sliceXY2))  allocate(sliceXY2(1,NgridX(1),NgridY(1)))
+    if(.not.allocated(sliceXZ2))  allocate(sliceXZ2(1,NgridX(1),NgridZ(1)))
+    if(.not.allocated(sliceYZ2))  allocate(sliceYZ2(1,NgridY(1),NgridZ(1)))
     sliceXY2 = sliceXY
     sliceXZ2 = sliceXZ
     sliceYZ2 = sliceYZ
-    esp_grid2 = esp_grid
+    esp_grid2 = esp_grid(1,:)
     total_charge2 = total_charge
     
     !allocate memory for the multipole information and read it
@@ -512,7 +560,7 @@ if(use_greedy_fit) then
         call calc_multipole_grid_and_slice_data(multipole,a) 
         !copy grid to GPU if using
 #ifdef GPU
-        if(gpu) call gpu_set_ESPgrid(gridval, esp_grid, Ngrid)
+        if(gpu) call gpu_set_ESPgrid(gridval(1,:,:), esp_grid(1,:), Ngrid(1))
 #endif
 !        if(num_charges_max < 5) then
 !            num_charges_max_multipole = num_charges_max
@@ -521,10 +569,10 @@ if(use_greedy_fit) then
         
         !calculate the RMSE of using no charge at all (needed later in sampling the population)        
         multipole_solutions_rmse(0,a) = 0._rp
-        do k = 1,Ngrid
-            multipole_solutions_rmse(0,a) = multipole_solutions_rmse(0,a) + esp_grid(k)**2
+        do k = 1,Ngrid(1)
+            multipole_solutions_rmse(0,a) = multipole_solutions_rmse(0,a) + esp_grid(1,k)**2
         end do
-        multipole_solutions_rmse(0,a) = sqrt(multipole_solutions_rmse(0,a)/Ngridr)
+        multipole_solutions_rmse(0,a) = sqrt(multipole_solutions_rmse(0,a)/Ngridr(1))
 
         outer: do num_charges = num_charges_min_multipole,num_charges_max_multipole
             !current dimensionality
@@ -545,6 +593,7 @@ if(use_greedy_fit) then
                   dummystring = "symatm"//trim(dummystring)//"_"//trim(dummystring2)//"charges.fit"
               end if
               
+              if(allocated(ref_atms)) deallocate(ref_atms)
               file_exists=read_sym_file(dummystring, &
                   multipole_solutions(:,num_charges,a),sym_solution_ops,&
                   num_sym_solution_ops,sqdim,num_charges,a,num_charges_max_multipole)
@@ -572,6 +621,7 @@ if(use_greedy_fit) then
             end if
             open(30,file=trim(dummystring), status='old', action='read',iostat = ios)
             if(ios == 0) then 
+                if(allocated(ref_atms)) deallocate(ref_atms)
                 !actually read in the solution
                 read(30,*,iostat=ios) i
                 if(ios /= 0 .or. i /= num_charges) call throw_error('Could not read "'//trim(dummystring)// &
@@ -595,7 +645,11 @@ if(use_greedy_fit) then
                 end if  
                 cycle
             end if        
-                
+          
+            ! don't run atom fits to multiple conformers...      
+            if(Nconf>1) then
+              call throw_error('Sorry, atom fitting is not yet implemented for multiple conformers')
+            end if
             ! initialize RMSE    
             multipole_solutions_rmse(num_charges,a) = vbig
 
@@ -680,7 +734,7 @@ if(use_greedy_fit) then
                     endif
                     !call write_cube_file(multipole_solutions(1:qdim,num_charges,a),a)
                     ! plot with R
-                    call write_image_slice_data(multipole_solutions(1:qdim,num_charges,a)) !for visualization with R
+                    call write_image_slice_data(multipole_solutions(1:qdim,num_charges,a),1) !for visualization with R
 !                    call execute_command_line("./visualize.r",wait=.true.)
                     write(dummystring,'(I0)') a
                     write(dummystring2,'(I0)') num_charges 
@@ -747,7 +801,7 @@ if(use_greedy_fit) then
     sliceXY = sliceXY2
     sliceXZ = sliceXZ2
     sliceYZ = sliceYZ2
-    esp_grid = esp_grid2
+    esp_grid(1,:) = esp_grid2(:)
     total_charge = total_charge2
     
     if(allocated(esp_grid2))    deallocate(esp_grid2)
@@ -755,6 +809,7 @@ if(use_greedy_fit) then
     if(allocated(sliceXZ2))     deallocate(sliceXZ2)
     if(allocated(sliceYZ2))     deallocate(sliceYZ2)
     if(allocated(search_range)) deallocate(search_range)    
+    if(allocated(ref_atms))     deallocate(ref_atms)
     if(greedy_only_multi) stop 
 end if
 
@@ -770,29 +825,26 @@ if(.not.allocated(multipole_solutions_rmse))  allocate( &
 if(.not.allocated(multipole_best))            allocate( &
    multipole_best(num_charges_max_multipole*4))
 
-!read in multipole data
-call read_multipole_file(input_multipolefile)
 
-!!subtract ESP at each grid point due to multipoles of atoms excluded from fit
-!outer: do a=1,Natom
-!  do b=1, natmfit  !skip atoms in fragment to be fitted
-!    i=fitatoms(b)
-!    if(i == a) cycle outer
-!  enddo
-!  call subtract_atom_multipole_ESP_from_grid(multipole,a)
-!enddo outer
 
 !if atoms are excluded from the fit then fit to multipolar ESP of remaining
 !atoms
 
 if(natmfit < Natom.and..not.use_symmetry) then ! some atoms are excluded
+  if(Nconf>1) then
+    call throw_error('Sorry, fragment fitting is not yet implemented for multiple conformers')
+  end if
   write(*,'(A)') 'Fragment fit detected'
   write(*,'(A)') 'Fitting to MTP grid, discarding reference MEP cube data'
   write(*,'(A)') 'Subsequent stats etc. are compared to MTP data, not the'
   write(*,'(A)') 'MEP from the reference cube file'
+
+  !read in multipole data
+  call read_multipole_file(input_multipolefile)
+
   ! first zero reference grid
-  do i = 1,Ngrid
-     esp_grid(i) = 0.d0
+  do i = 1,Ngrid(1)
+     esp_grid(1,i) = 0.d0
   end do
   ! now repopulate with multipolar ESP
   do b=1, natmfit  
@@ -809,7 +861,7 @@ if(natmfit < Natom.and..not.use_symmetry) then ! some atoms are excluded
 endif
 !copy ESP grid to GPU memory
 #ifdef GPU
-  if(gpu) call gpu_set_ESPgrid(gridval, esp_grid, Ngrid)
+  if(gpu) call gpu_set_ESPgrid(gridval(1,:,:), esp_grid(1,:), Ngrid(1))
 #endif
 
 !refining the solution
@@ -817,6 +869,38 @@ if(refine_solution) then
     ! symmetry not yet implemented for refinement
     if(use_symmetry)then
       call throw_error('Sorry, symmetry is not yet implemented for model refinement')
+    endif
+    if(natmfreeze.gt.0)then
+      write(*,'(A)',advance='no') 'Charges on atoms '
+      do i=1,natmfreeze
+        write(*,'(I0,A)',advance='no') freezeatoms(i),','
+        if(freezeatoms(i).lt.1 .or. freezeatoms(i).gt.Natom) then
+          call throw_error('Frozen atom index out of range!')
+        endif
+      enddo
+      write(*,'(A,2/)') ' will be frozen in the fit'
+
+      !remove frozen atoms from list to fit
+      i=1
+      do 
+        i=i+1
+        if(i.gt.natmfit) exit
+        do j=1,natmfreeze
+          if(fitatoms(i).eq.freezeatoms(j))then
+            natmfit=natmfit-1
+            do k=i,natmfit
+              fitatoms(k)=fitatoms(k+1)
+            enddo
+            i=i-1
+            exit
+          endif
+        enddo
+      enddo
+      write(*,'(A)',advance='no') 'Charges on atoms '
+      do i=1,natmfit
+        write(*,'(I0,A)',advance='no') fitatoms(i),','
+      enddo
+      write(*,'(A,2/)') ' will be included in the fit'
     endif
     open(30, file=trim(input_xyzfile), status="old", action="read", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "'//trim(input_xyzfile)//'" for reading')
@@ -850,6 +934,56 @@ if(refine_solution) then
       write(*,'(A,A)') " Refining solution from file",trim(input_xyzfile)
       write(*,'(A,I6,A)') " Contains ",num_charges," charges"
       write(*,'(A,ES23.9,A)') "      Initial RMSE = ",RMSE_best*hartree2kcal," kcal/mol"
+    endif
+
+    ! remove charges of frozen atoms
+    if(natmfreeze.gt.0)then
+      !first get last charge (needed in the following)
+      tmp=total_charge
+      do i=1,qdim-3,4
+        tmp=tmp-charges(i+3)
+      enddo
+      if(verbose) write(*,'(A)') " Removing charges of frozen atoms..."
+      call assign_charges_to_atoms(charges,1)
+      i=0
+      do
+        i=i+1
+        if(i.gt.num_charges) exit
+        do j=1,natmfreeze
+          if(ref_atms(i).eq.freezeatoms(j))then
+            ! first remove charge ESP from reference ESP grid
+            do k=1,Nconf
+              if(i.lt.num_charges)then
+                call subtract_charge_ESP_from_grid(charges(i*4-3:i*4),k)
+              else ! last charge
+                call subtract_charge_ESP_from_grid((/charges(i*4-3:i*4-1),tmp/),k)
+              endif
+            enddo
+            ! correct total charge:
+            if(i*4 .lt. qdim) total_charge=total_charge-charges(i*4)
+            do k=i*4-3,qdim-8,4
+              charges(k:k+3)=charges(k+4:k+7)
+            enddo
+            charges(k:k+2)=charges(k+4:k+6)
+            if(qdim.gt.3) then
+              qdim=qdim-4
+            else ! last charge...
+              qdim=qdim-3
+            endif
+            do k=i,num_charges-1
+              ref_atms(k)=ref_atms(k+1)
+            enddo
+            num_charges=num_charges-1
+            i=i-1
+            exit
+          endif
+        enddo
+      enddo
+      write(*,'(A,I0,A,F6.3/)') " ",num_charges," charges remain, total charge: ",&
+             total_charge
+      do i=1,Nconf
+        call trim_ESP_grid(i)
+      enddo
     endif
 
     bestcharges = charges 
@@ -896,7 +1030,9 @@ if(refine_solution) then
             call write_xyz_file(charges(1:qdim),filename=dummystring)
             !call write_cube_file(charges(1:qdim))
             ! plot with R
-            call write_image_slice_data(charges(1:qdim)) !for visualization with R
+            do i=1,Nconf !write separate files for each conformer
+              call write_image_slice_data(charges(1:qdim),i) !for visualization with R
+            end do
 !            call execute_command_line("./visualize.r",wait=.true.)
             dummystring = trim(input_xyzfile)//"_comparison.png"
             call execute_command_line("mv comparison.png "//trim(dummystring),wait=.true.)
@@ -1054,7 +1190,9 @@ do num_charges = num_charges_min,num_charges_max
             call write_xyz_file(charges(1:qdim))
             !call write_cube_file(charges(1:qdim))
             ! plot with R
-            call write_image_slice_data(charges(1:qdim)) !for visualization with R
+            do i=1,Nconf ! write a separate file for each conformer
+              call write_image_slice_data(charges(1:qdim),i) !for visualization with R
+            end do
 !            call execute_command_line("./visualize.r",wait=.true.)
             write(dummystring,'(I0)') num_charges 
             dummystring = trim(dummystring)//"charges_comparison.png"
@@ -1069,6 +1207,10 @@ do num_charges = num_charges_min,num_charges_max
     !MAE_tmp         = mae_qtot(charges(1:qdim)) 
     !maxAE_tmp       = max_ae_qtot(charges(1:qdim))
     if(verbose) then
+        if(Nconf>1)then
+          call rmse_conformer_qtot(charges(1:qdim))
+        end if
+
         write(*,'(A,I0,A)') "Best found solution for ",num_charges," charges:"
         write(*,'(A,ES23.9,A)') "        RMSE ", &
                   RMSE_tmp*hartree2kcal," kcal/mol"
@@ -1182,14 +1324,14 @@ logical function feasible(q)
         rmin = vbig
         if(use_symmetry) then
           do a = 1,Natom
-              r = sqrt(sum((atom_pos(:,a)-q(i:i+2))**2))/(vdW_scaling*vdW_radius(atom_num(a)))
+              r = sqrt(sum((atom_pos(1,:,a)-q(i:i+2))**2))/(vdW_scaling*vdW_radius(atom_num(a)))
               !print*, atom_num(a), vdW_radius(atom_num(a))*bohr2angstrom
               if(r < rmin) rmin = r
           end do
         else
           do b = 1,natmfit
               a = fitatoms(b)
-              r = sqrt(sum((atom_pos(:,a)-q(i:i+2))**2))/(vdW_scaling*vdW_radius(atom_num(a)))
+              r = sqrt(sum((atom_pos(1,:,a)-q(i:i+2))**2))/(vdW_scaling*vdW_radius(atom_num(a)))
               !print*, atom_num(a), vdW_radius(atom_num(a))*bohr2angstrom
               if(r < rmin) rmin = r
           end do
@@ -1216,53 +1358,6 @@ logical function feasible(q)
 !    print*,'feasible!'
     return
 end function feasible
-!-------------------------------------------------------------------------------
-! transforms charges from their original conformer to a new conformer using
-! standard DCM local axes
-subroutine transform_charges_to_new_conf(q,refcube)
-    implicit none
-    real(rp), dimension(:) :: q
-    real(rp), dimension(num_charges,3) :: pos, lpos     !stores all the position
-    real(rp), dimension(Natom,3) :: ref_atm_pos, new_atm_pos
-    integer :: counter
-    character(len=*), intent(in) :: refcube
-
-    !store positions in pos array
-    counter=0
-    do i = 1,size(q,dim=1),4
-        counter = counter + 1
-        pos(counter,1:3) = q(i:i+2) 
-    end do
-
-    call read_axis_frames() !read frame definitions from file
-    call read_coor_from_cube(refcube,ref_atm_pos) !store ref atom coords in array
-    call global_to_local(ref_atm_pos,pos,lpos) !
-
-    do i=1,Natom
-      new_atm_pos(i,1:3) = atom_pos(1:3,i)
-    end do
-
-    call local_to_global(new_atm_pos,lpos,pos)
-
-    !overwrite positions in original charges array
-    counter=0
-    do i = 1,size(q,dim=1),4
-        counter = counter + 1
-        q(i:i+2) = pos(counter,1:3)
-    end do
-
-    if(verbose) then ! print transformed coordinates
-      write(*,*) 
-      write(*,*) 'Transformed charge positions for new conformer:'
-      counter=0
-      do i=1,size(q,dim=1),4
-        counter = counter + 1
-        write(*,*) ' X ',q(i:i+2)*bohr2angstrom
-      end do
-      write(*,*)
-    end if
-
-end subroutine transform_charges_to_new_conf
 !-------------------------------------------------------------------------------
 ! reads nuclear positions from cube file and stores in array
 subroutine read_coor_from_cube(refcube,tmp_pos)
@@ -1310,31 +1405,34 @@ subroutine read_coor_from_cube(refcube,tmp_pos)
 end subroutine read_coor_from_cube
 
 !-------------------------------------------------------------------------------
-! converts charge positions in global coordinates to local coordinates
-subroutine global_to_local(ref_atm_pos,pos,lpos)
+! assign charges to nearest nuclei
+subroutine assign_charges_to_atoms(q,lconf)
     implicit none
-    real(rp), dimension(:,:) :: ref_atm_pos,pos,lpos
-    integer, dimension(Natom) :: atm_frames
-    integer :: i,j,nq,nf
-    integer :: atm1,atm2,atm3
-    real(rp), dimension(3) :: b1,b2,r,rb1,rb2,tpos
-    real(rp), dimension(3) :: ex1,ey1,ez1,ex2,ey2,ez2,ex3,ey3,ez3 !local axes
+    real(rp), dimension(:) :: q
+    real(rp), dimension(num_charges,3) :: pos
+    integer :: i,j,counter,lconf
     real(rp) :: dx,dy,dz,r2,rmin2
 
-    if(.not.allocated(ref_atms)) allocate(ref_atms(size(pos,dim=1)))
+    !store positions in lpos array
+    counter=0
+    do i = 1,size(q,dim=1),4
+        counter = counter + 1
+        pos(counter,1:3) = q(i:i+2)
+    end do
+
+    if(.not.allocated(ref_atms)) allocate(ref_atms(num_charges))
 
     ! (re)assign charges to nuclei
-    nq=size(pos,dim=1)
-    do i=1,nq
-      dx=pos(i,1)-ref_atm_pos(1,1)
-      dy=pos(i,2)-ref_atm_pos(1,2)
-      dz=pos(i,3)-ref_atm_pos(1,3)
+    do i=1,num_charges
+      dx=pos(i,1)-atom_pos(lconf,1,1)
+      dy=pos(i,2)-atom_pos(lconf,2,1)
+      dz=pos(i,3)-atom_pos(lconf,3,1)
       rmin2=dx*dx+dy*dy+dz*dz
       ref_atms(i)=1
       do j=2,Natom
-        dx=pos(i,1)-ref_atm_pos(j,1)
-        dy=pos(i,2)-ref_atm_pos(j,2)
-        dz=pos(i,3)-ref_atm_pos(j,3)
+        dx=pos(i,1)-atom_pos(lconf,1,j)
+        dy=pos(i,2)-atom_pos(lconf,2,j)
+        dz=pos(i,3)-atom_pos(lconf,3,j)
         r2=dx*dx+dy*dy+dz*dz
         if(r2 .lt. rmin2) then
           rmin2=r2
@@ -1342,199 +1440,257 @@ subroutine global_to_local(ref_atm_pos,pos,lpos)
         endif
       enddo !j
     enddo !i
+end subroutine assign_charges_to_atoms
+
+!-------------------------------------------------------------------------------
+! converts charge positions in global coordinates to local coordinates
+subroutine global_to_local(gq,lq,lconf)
+    implicit none
+    real(rp), dimension(:) :: lq,gq
+    real(rp), dimension(num_charges,3) :: pos,lpos
+    integer, dimension(Natom) :: atm_frames
+    integer :: i,j,lconf,counter
+    integer :: atm1,atm2,atm3
+    real(rp), dimension(3) :: tpos
+
+    !store positions in pos array
+    counter=0
+    do i = 1,size(gq,dim=1),4
+        counter = counter + 1
+        pos(counter,:) = gq(i:i+2)
+    end do
 
     atm_frames(:) = 0
-    nf=size(frames,dim=1)
-    do i=1,nf
+    do i=1,Nframes
       atm1=frames(i,1)
       atm2=frames(i,2)
       atm3=frames(i,3)
 
-      b1=ref_atm_pos(atm1,:)-ref_atm_pos(atm2,:)
-      rb1=norm2(b1)
-      b1=b1/rb1
-      b2=ref_atm_pos(atm3,:)-ref_atm_pos(atm2,:)
-      rb2=norm2(b2)
-      b2=b2/rb2
-
-      ez1=b1 ! local z-axes are along bonds
-      ez2=b1
-      ez3=b2
-
-      ey1=cross(b1,b2) ! local z-axes are orthogonal to plane
-      r=norm2(ey1)
-      ey1=ey1/r
-      ey2=ey1
-      ey3=ey1
-
-      ex1=cross(b1,ey1)
-      r=norm2(ex1)
-      ex1=ex1/r
-      ex2=ex1
-      ex3=cross(b2,ey1)
-      r=norm2(ex3)
-      ex3=ex3/r
-
       if(atm_frames(atm1) == 0) then
         atm_frames(atm1)=i
-        do j=1,nq
+        do j=1,num_charges
           if(ref_atms(j) == atm1) then ! if charge belongs to atm1 of frame
-            tpos=pos(j,:)-ref_atm_pos(atm1,:)
-            lpos(j,1)=dot(tpos,ex1)
-            lpos(j,2)=dot(tpos,ey1)
-            lpos(j,3)=dot(tpos,ez1)
+            tpos=pos(j,:)-atom_pos(lconf,:,atm1)
+            lpos(j,1)=dot(tpos,ex1(lconf,i,:))
+            lpos(j,2)=dot(tpos,ey1(lconf,i,:))
+            lpos(j,3)=dot(tpos,ez1(lconf,i,:))
           end if
         end do
       end if
       if(atm_frames(atm2) == 0) then
         atm_frames(atm2)=i
-        do j=1,nq
+        do j=1,num_charges
           if(ref_atms(j) == atm2) then ! if charge belongs to atm2 of frame
-            tpos=pos(j,:)-ref_atm_pos(atm2,:)
-            lpos(j,1)=dot(tpos,ex2)
-            lpos(j,2)=dot(tpos,ey2)
-            lpos(j,3)=dot(tpos,ez2)
+            tpos=pos(j,:)-atom_pos(lconf,:,atm2)
+            lpos(j,1)=dot(tpos,ex2(lconf,i,:))
+            lpos(j,2)=dot(tpos,ey2(lconf,i,:))
+            lpos(j,3)=dot(tpos,ez2(lconf,i,:))
           end if
         end do
       end if
       if(atm_frames(atm3) == 0) then 
         atm_frames(atm3)=i
-        do j=1,nq
+        do j=1,num_charges
           if(ref_atms(j) == atm3) then ! if charge belongs to atm3 of frame
-            tpos=pos(j,:)-ref_atm_pos(atm3,:)
-            lpos(j,1)=dot(tpos,ex3)
-            lpos(j,2)=dot(tpos,ey3)
-            lpos(j,3)=dot(tpos,ez3)
+            tpos=pos(j,:)-atom_pos(lconf,:,atm3)
+            lpos(j,1)=dot(tpos,ex3(lconf,i,:))
+            lpos(j,2)=dot(tpos,ey3(lconf,i,:))
+            lpos(j,3)=dot(tpos,ez3(lconf,i,:))
           end if
         end do
       end if
+    end do
+
+    !store transformed positions in lq array
+    counter=0
+    do i = 1,size(lq,dim=1),4
+        counter = counter + 1
+        lq(i:i+2) = lpos(counter,1:3)
+        if((i+3).le.size(lq,dim=1))then !handle last charge is empty to balance total charge
+          lq(i+3) = gq(i+3)
+        end if
     end do
 
 end subroutine global_to_local
 
 !-------------------------------------------------------------------------------
 ! converts charge positions in local coordinates to global coordinates
-subroutine local_to_global(new_atm_pos,lpos,pos)
+subroutine local_to_global(lq,gq,lconf)
     implicit none
-    real(rp), dimension(:,:) :: new_atm_pos,pos,lpos
+    real(rp), dimension(:) :: lq,gq
+    real(rp), dimension(num_charges,3) :: pos,lpos
     integer, dimension(Natom) :: atm_frames
-    integer :: i,j,nq,nf
+    integer :: i,j,lconf,counter
     integer :: atm1,atm2,atm3
-    real(rp), dimension(3) :: b1,b2,r,rb1,rb2,tpos
-    real(rp), dimension(3) :: ex1,ey1,ez1,ex2,ey2,ez2,ex3,ey3,ez3 !local axes
-    real(rp) :: dx,dy,dz,r2,rmin2
 
-    nq=size(lpos,dim=1)
-    nf=size(frames,dim=1)
     atm_frames(:)=0
-    do i=1,nf
+
+    !store positions in lpos array
+    counter=0
+    do i = 1,size(lq,dim=1),4
+        counter = counter + 1
+        lpos(counter,1:3) = lq(i:i+2)
+    end do
+
+    pos(:,:)=0.d0
+    do i=1,Nframes
       atm1=frames(i,1)
       atm2=frames(i,2)
       atm3=frames(i,3)
 
-      b1=new_atm_pos(atm1,:)-new_atm_pos(atm2,:)
-      rb1=norm2(b1)
-      b1=b1/rb1
-      b2=new_atm_pos(atm3,:)-new_atm_pos(atm2,:)
-      rb2=norm2(b2)
-      b2=b2/rb2
-
-      ez1=b1 ! local z-axes are along bonds
-      ez2=b1
-      ez3=b2
-
-      ey1=cross(b1,b2) ! local z-axes are orthogonal to plane
-      r=norm2(ey1)
-      ey1=ey1/r
-      ey2=ey1
-      ey3=ey1
-
-      ex1=cross(b1,ey1)
-      r=norm2(ex1)
-      ex1=ex1/r
-      ex2=ex1
-      ex3=cross(b2,ey1)
-      r=norm2(ex3)
-      ex3=ex3/r
-
-      pos(:,:)=0.d0
-
       if(atm_frames(atm1) == 0) then
         atm_frames(atm1)=i
-        do j=1,nq
+        do j=1,num_charges
           if(ref_atms(j) == atm1) then ! if charge belongs to atm1 of frame
-            pos(j,1)=new_atm_pos(atm1,1) + lpos(j,1)*ex1(1) + lpos(j,2)*ey1(1) + &
-                     lpos(j,3)*ez1(1)
-            pos(j,2)=new_atm_pos(atm1,2) + lpos(j,1)*ex1(2) + lpos(j,2)*ey1(2) + &
-                     lpos(j,3)*ez1(2)
-            pos(j,3)=new_atm_pos(atm1,3) + lpos(j,1)*ex1(3) + lpos(j,2)*ey1(3) + &
-                     lpos(j,3)*ez1(3)
+            pos(j,1)=atom_pos(lconf,1,atm1) + lpos(j,1)*ex1(lconf,i,1) + &
+                     lpos(j,2)*ey1(lconf,i,1) + lpos(j,3)*ez1(lconf,i,1)
+            pos(j,2)=atom_pos(lconf,2,atm1) + lpos(j,1)*ex1(lconf,i,2) + &
+                     lpos(j,2)*ey1(lconf,i,2) + lpos(j,3)*ez1(lconf,i,2)
+            pos(j,3)=atom_pos(lconf,3,atm1) + lpos(j,1)*ex1(lconf,i,3) + &
+                     lpos(j,2)*ey1(lconf,i,3) + lpos(j,3)*ez1(lconf,i,3)
           end if
         end do
       end if
       if(atm_frames(atm2) == 0) then
         atm_frames(atm2)=i
-        do j=1,nq
+        do j=1,num_charges
           if(ref_atms(j) == atm2) then ! if charge belongs to atm1 of frame
-            pos(j,1)=new_atm_pos(atm2,1) + lpos(j,1)*ex2(1) + lpos(j,2)*ey2(1) + &
-                     lpos(j,3)*ez2(1)
-            pos(j,2)=new_atm_pos(atm2,2) + lpos(j,1)*ex2(2) + lpos(j,2)*ey2(2) + &
-                     lpos(j,3)*ez2(2)
-            pos(j,3)=new_atm_pos(atm2,3) + lpos(j,1)*ex2(3) + lpos(j,2)*ey2(3) + &
-                     lpos(j,3)*ez2(3)
+            pos(j,1)=atom_pos(lconf,1,atm2) + lpos(j,1)*ex2(lconf,i,1) + &
+                     lpos(j,2)*ey2(lconf,i,1) + lpos(j,3)*ez2(lconf,i,1)
+            pos(j,2)=atom_pos(lconf,2,atm2) + lpos(j,1)*ex2(lconf,i,2) + &
+                     lpos(j,2)*ey2(lconf,i,2) + lpos(j,3)*ez2(lconf,i,2)
+            pos(j,3)=atom_pos(lconf,3,atm2) + lpos(j,1)*ex2(lconf,i,3) + &
+                     lpos(j,2)*ey2(lconf,i,3) + lpos(j,3)*ez2(lconf,i,3)
           end if
         end do
       end if
       if(atm_frames(atm3) == 0) then
         atm_frames(atm3)=i
-        do j=1,nq
+        do j=1,num_charges
           if(ref_atms(j) == atm3) then ! if charge belongs to atm1 of frame
-            pos(j,1)=new_atm_pos(atm3,1) + lpos(j,1)*ex3(1) + lpos(j,2)*ey3(1) + &
-                     lpos(j,3)*ez3(1)
-            pos(j,2)=new_atm_pos(atm3,2) + lpos(j,1)*ex3(2) + lpos(j,2)*ey3(2) + &
-                     lpos(j,3)*ez3(2)
-            pos(j,3)=new_atm_pos(atm3,3) + lpos(j,1)*ex3(3) + lpos(j,2)*ey3(3) + &
-                     lpos(j,3)*ez3(3)
+            pos(j,1)=atom_pos(lconf,1,atm3) + lpos(j,1)*ex3(lconf,i,1) + &
+                     lpos(j,2)*ey3(lconf,i,1) + lpos(j,3)*ez3(lconf,i,1)
+            pos(j,2)=atom_pos(lconf,2,atm3) + lpos(j,1)*ex3(lconf,i,2) + &
+                     lpos(j,2)*ey3(lconf,i,2) + lpos(j,3)*ez3(lconf,i,2)
+            pos(j,3)=atom_pos(lconf,3,atm3) + lpos(j,1)*ex3(lconf,i,3) + &
+                     lpos(j,2)*ey3(lconf,i,3) + lpos(j,3)*ez3(lconf,i,3)
           end if
         end do
       end if
     end do
 
+    !store transformed positions in q array
+    counter=0
+    do i = 1,size(lq,dim=1),4
+        counter = counter + 1
+        gq(i:i+2) = pos(counter,1:3) 
+        if((i+3).le.size(gq,dim=1))then !handle last charge is empty to balance total charge
+          gq(i+3) = lq(i+3)
+        end if
+    end do
+
 end subroutine local_to_global
+
+!-------------------------------------------------------------------------------
+! determines local axes for a given conformer
+subroutine get_local_axes(lconf,lex1,ley1,lez1,lex2,ley2,lez2,lex3,ley3,lez3)
+    implicit none
+    integer :: lconf
+    real(rp), dimension(:,:) :: lex1,ley1,lez1,lex2,ley2,lez2,lex3,ley3,lez3
+    integer :: atm1,atm2,atm3,i
+    real(rp), dimension(3) :: b1,b2
+    real(rp) :: r,rb1,rb2,rbi
+    
+
+    do i=1,Nframes
+      atm1=frames(i,1)
+      atm2=frames(i,2)
+      atm3=frames(i,3)
+
+      b1=atom_pos(lconf,:,atm1)-atom_pos(lconf,:,atm2)
+      rb1=norm2(b1)
+      b1=b1/rb1
+      b2=atom_pos(lconf,:,atm3)-atom_pos(lconf,:,atm2)
+      rb2=norm2(b2)
+      b2=b2/rb2
+
+      lez1(i,:)=b1 ! local z-axes are along bonds
+      lez2(i,:)=b1
+      lez3(i,:)=b2
+
+      ! correct atom 2 z-axis for bisector-type frame
+      if(frametypes(i).eq.'BI')then
+        lez2(i,:)=lez1(i,:)+lez3(i,:)
+        rbi=sqrt(lez2(i,1)**2+lez2(i,2)**2+lez2(i,3)**2)
+        if(abs(rbi).lt.0.00001) then
+          call throw_error('colinearity detected in local axis system')
+        endif
+        lez2(i,:)=lez2(i,:)/rbi
+      endif
+
+      ley1(i,:)=cross(b1,b2) ! local y-axes are orthogonal to plane
+      r=norm2(ley1(i,:))
+      ley1(i,:)=ley1(i,:)/r
+      ley2(i,:)=ley1(i,:)
+      ley3(i,:)=ley1(i,:)
+
+      lex1(i,:)=cross(b1,ley1(i,:))
+      r=norm2(lex1(i,:))
+      lex1(i,:)=lex1(i,:)/r
+      lex2(i,:)=lex1(i,:)
+      lex3(i,:)=cross(b2,ley1(i,:))
+      r=norm2(lex3(i,:))
+      lex3(i,:)=lex3(i,:)/r
+    end do
+ 
+end subroutine get_local_axes
 
 !-------------------------------------------------------------------------------
 ! reads frames file for DCM local axis frame definitions
 subroutine read_axis_frames()
     implicit none
     integer, dimension(Natom,3) :: tframes
-    integer :: nf,i,ios
+    integer :: i,ios
+    character(len=2), dimension(Natom) :: tframetypes
     character(len=1024) :: dummy
     real(rp) :: tmp
 
     open(30, file=trim(local_framefile), status="old", action="read", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "'//trim(local_framefile)//'" for reading')
 
-    nf=0
-    read(30,*,iostat=ios) dummy !first line is residue type, not needed
+    Nframes=0
+    read(30,'(A)',iostat=ios) dummy !first line is residue type, not needed
     do
-      read(30,'(A)',end=999) dummy
+      read(30,'(A)',end=999) dummy !second line with atom numbers and frame type
       if(dummy.ne.'')then
-        backspace(30)
-        nf=nf+1
-        read(30,*) tframes(nf,1:3)
+        Nframes=Nframes+1
+        read(dummy,*) tframes(Nframes,1),tframes(Nframes,2),tframes(Nframes,3),&
+             tframetypes(Nframes)
       else
         exit
       end if
     end do
     999 continue
+    close(30)
 
     if(allocated(frames)) deallocate(frames)
-    allocate(frames(nf,3))
+    if(allocated(frametypes)) deallocate(frametypes)
+    allocate(frames(Nframes,3))
+    allocate(frametypes(Nframes))
 
     if(verbose) write(*,'(A)') 'Read frames:'
-    do i=1,nf
+    do i=1,Nframes
       write(*,'(3I4)'),tframes(i,1:3)
       frames(i,1:3) = tframes(i,1:3)
+      if(tframetypes(i).eq.'BO'.or.tframetypes(i).eq.'bo')then
+        if(verbose) write(*,'(A,I0)') ' Using bond-type local axes for frame ',i
+        frametypes(i)='BO'
+      elseif(tframetypes(i).eq.'BI'.or.tframetypes(i).eq.'bi')then
+        if(verbose) write(*,'(A,I0)') ' Using bisector-type local axes for frame ',i
+        frametypes(i)='BI'
+      else
+        call throw_error('Did not recognize frame type '//tframetypes(i))
+      endif
     enddo
     if(verbose) write(*,*)
     
@@ -1674,7 +1830,8 @@ real(rp) function sum_constr(q)
         rmin = vbig
         do b = 1,natmfit
             a = fitatoms(b)
-            r = sqrt(sum((atom_pos(:,a)-q(i:i+2))**2))/(vdW_scaling*vdW_radius(atom_num(a)))
+            ! only do this for the first conformer, should be same for the others
+            r = sqrt(sum((atom_pos(1,:,a)-q(i:i+2))**2))/(vdW_scaling*vdW_radius(atom_num(a)))
             if(r < rmin) rmin = r
         end do
         if(rmin > 1._rp) then !this means that rmin is larger than the vdW radius
@@ -1718,6 +1875,30 @@ real(rp) function rmse_qtot(qin)
 end function rmse_qtot
 !-------------------------------------------------------------------------------
 
+!-------------------------------------------------------------------------------
+! computes root mean squared error of the current fit to the true esp, using constraint charges
+! (this means that the total charge must add up to a specific value)
+! results are reported for each conformer seperately
+subroutine rmse_conformer_qtot(qin)
+    implicit none
+    real(rp), dimension(:) :: qin ! input charges
+    real(rp), dimension(size(qin,dim=1)+1) :: q   ! complete charges
+    real(rp) :: qsum,trmse
+    integer :: i
+    qsum = 0._rp
+    do i = 1,size(qin,dim=1)-3,4
+        qsum = qsum + qin(i+3)
+    end do
+    q(1:size(qin,dim=1)) = qin(:)
+    q(size(q,dim=1)) = total_charge - qsum
+
+    do i=1,Nconf
+      trmse = rmse_conf(q,i)
+      write(*,*) 'Total RMSE for conformer ',i,': ',trmse*hartree2kcal,' kcal/mol'
+    end do
+
+end subroutine rmse_conformer_qtot
+!-------------------------------------------------------------------------------
 
 !-------------------------------------------------------------------------------
 ! computes root mean squared error of the current fit to the true esp, using constraint
@@ -1780,15 +1961,44 @@ end function sym_atm_rmse_qtot
 ! computes root mean squared error of the current fit to the true esp
 real(rp) function rmse(q)
     implicit none
-    real(rp), dimension(:) :: q ! input charges
-    integer :: idx
+    real(rp), dimension(:) :: q                 ! input charges
+    real(rp), dimension(size(q,dim=1)) :: q2,q3 ! transformed charges
+    integer :: idx,i
     rmse = 0._rp
-    do idx = 1,Ngrid
-!        rmse = rmse + (coulomb_potential_sp(real(gridval(:,idx)),real(q)) - real(esp_grid(idx)))**2
-        rmse = rmse + (coulomb_potential(gridval(:,idx),q) - esp_grid(idx))**2
+    do idx = 1,Ngrid(1)
+      rmse = rmse + (coulomb_potential(gridval(1,:,idx),q) - esp_grid(1,idx))**2
     end do
-    rmse = sqrt(rmse/Ngridr)
+    do i = 2,Nconf
+      if(i == 2) then
+        call assign_charges_to_atoms(q,1)
+        call global_to_local(q,q2,1) !transform charge positions to local coords
+      end if
+      call local_to_global(q2,q3,i) !transform back to global for new conformer
+      do idx = 1,Ngrid(i)
+        rmse = rmse + (coulomb_potential(gridval(i,:,idx),q3) - esp_grid(i,idx))**2
+      end do
+    end do
+    rmse = sqrt(rmse/NgridrTot)
 end function rmse
+!-------------------------------------------------------------------------------
+
+!-------------------------------------------------------------------------------
+! computes root mean squared error of the current fit to the true esp
+! for a specified conformer only
+real(rp) function rmse_conf(q,lconf)
+    implicit none
+    real(rp), dimension(:) :: q                 ! input charges
+    real(rp), dimension(size(q,dim=1)) :: q2,q3 ! transformed charges
+    integer :: idx,i,lconf
+    rmse_conf = 0._rp
+    call assign_charges_to_atoms(q,1)
+    call global_to_local(q,q2,1) !transform charge positions to local coords
+    call local_to_global(q2,q3,lconf) !transform back to global for new conformer
+    do idx = 1,Ngrid(lconf)
+      rmse_conf = rmse_conf + (coulomb_potential(gridval(lconf,:,idx),q3) - esp_grid(lconf,idx))**2
+    end do
+    rmse_conf = sqrt(rmse_conf/Ngrid(lconf))
+end function rmse_conf
 !-------------------------------------------------------------------------------
 
 !-------------------------------------------------------------------------------
@@ -1798,10 +2008,10 @@ real(rp) function rmse_multipole(m)
     real(rp), dimension(:) :: m ! input multipoles
     integer :: idx
     rmse_multipole = 0._rp
-    do idx = 1,Ngrid
-        rmse_multipole = rmse_multipole + (coulomb_potential_multipole(gridval(:,idx),m) - esp_grid(idx))**2
+    do idx = 1,Ngrid(1)
+        rmse_multipole = rmse_multipole + (coulomb_potential_multipole(gridval(1,:,idx),m) - esp_grid(1,idx))**2
     end do
-    rmse_multipole = sqrt(rmse_multipole/Ngridr)
+    rmse_multipole = sqrt(rmse_multipole/Ngridr(1))
 end function rmse_multipole
 !-------------------------------------------------------------------------------
 
@@ -1811,7 +2021,7 @@ end function rmse_multipole
 subroutine do_analysis(vdw_grid_min_cutoff,vdw_grid_max_cutoff)
     implicit none
     real(rp), parameter :: hartree2kcalmol = 627.509469_rp
-    integer :: idx, Nclose, Nmedium, Nfar, npts
+    integer :: idx, i, Nclose, Nmedium, Nfar, npts
     real(rp) :: rmse_tot, rmse_close, rmse_medium, rmse_far, maxerror, currerror
     real(rp) :: vdw_grid_min_cutoff,  vdw_grid_max_cutoff
     real(rp) :: tmp_min_cutoff, tmp_max_cutoff
@@ -1824,14 +2034,16 @@ subroutine do_analysis(vdw_grid_min_cutoff,vdw_grid_max_cutoff)
     npts = 0
     tmp_min_cutoff = vdw_grid_min_cutoff
     vdw_grid_min_cutoff = 1.2_rp
-    do idx = 1,Ngrid
-      if(in_interaction_belt(gridval(:,idx),vdw_grid_min_cutoff, &
-          vdw_grid_max_cutoff)) then
-        npts = npts + 1
-        currerror = (esp_grid2(idx) - esp_grid(idx))**2 
-        rmse_tot = rmse_tot + currerror  
-        if(currerror > maxerror) maxerror = currerror
-      end if
+    do i=1,Nconf
+      do idx = 1,Ngrid(i)
+        if(in_interaction_belt(gridval(i,:,idx),vdw_grid_min_cutoff, &
+            vdw_grid_max_cutoff,i)) then
+          npts = npts + 1
+          currerror = (esp_grid2(idx) - esp_grid(i,idx))**2 
+          rmse_tot = rmse_tot + currerror  
+          if(currerror > maxerror) maxerror = currerror
+        end if
+      end do
     end do    
     write(*,'(A30,2ES23.9,I10)') "Total", sqrt(rmse_tot/npts)*hartree2kcalmol, &
         sqrt(maxerror)*hartree2kcalmol,npts
@@ -1845,14 +2057,16 @@ subroutine do_analysis(vdw_grid_min_cutoff,vdw_grid_max_cutoff)
     tmp_max_cutoff = vdw_grid_max_cutoff
     vdw_grid_min_cutoff = 1.2_rp
     vdw_grid_max_cutoff = 1.66_rp
-    do idx = 1,Ngrid
-        if(in_interaction_belt(gridval(:,idx),vdw_grid_min_cutoff, &
-           vdw_grid_max_cutoff)) then
+    do i = 1,Nconf
+      do idx = 1,Ngrid(i)
+        if(in_interaction_belt(gridval(i,:,idx),vdw_grid_min_cutoff, &
+           vdw_grid_max_cutoff,i)) then
             Nclose = Nclose + 1
-            currerror = (esp_grid2(idx) - esp_grid(idx))**2 
+            currerror = (esp_grid2(idx) - esp_grid(i,idx))**2 
             rmse_close = rmse_close + currerror 
             if(currerror > maxerror) maxerror = currerror
         end if
+      end do
     end do
     if(Nclose > 0)  write(*,'(A7,F6.2,A7,F6.2,A4,2ES23.9,I10)') "Close (", &
        vdw_grid_min_cutoff," < r < ",vdw_grid_max_cutoff,")  ", &
@@ -1869,14 +2083,16 @@ subroutine do_analysis(vdw_grid_min_cutoff,vdw_grid_max_cutoff)
     tmp_max_cutoff = vdw_grid_max_cutoff
     vdw_grid_min_cutoff = 1.66_rp
     vdw_grid_max_cutoff = 2.20_rp
-    do idx = 1,Ngrid
-        if(in_interaction_belt(gridval(:,idx),vdw_grid_min_cutoff, &
-           vdw_grid_max_cutoff)) then
+    do i = 1,Nconf
+      do idx = 1,Ngrid(i)
+        if(in_interaction_belt(gridval(i,:,idx),vdw_grid_min_cutoff, &
+           vdw_grid_max_cutoff,i)) then
             Nmedium = Nmedium + 1
-            currerror = (esp_grid2(idx) - esp_grid(idx))**2 
+            currerror = (esp_grid2(idx) - esp_grid(i,idx))**2 
             rmse_medium = rmse_medium + currerror 
             if(currerror > maxerror) maxerror = currerror  
         end if
+      end do
     end do
     if(Nmedium > 0)  write(*,'(A11,F5.2,A7,F5.2,A2,2ES23.9,I10)') "Mid-range (",&
          vdw_grid_min_cutoff," < r < ", &
@@ -1892,14 +2108,16 @@ subroutine do_analysis(vdw_grid_min_cutoff,vdw_grid_max_cutoff)
     maxerror = 0._rp
     tmp_min_cutoff = vdw_grid_min_cutoff
     vdw_grid_min_cutoff = 2.20_rp
-    do idx = 1,Ngrid
-        if(in_interaction_belt(gridval(:,idx),vdw_grid_min_cutoff, &
-           vdw_grid_max_cutoff)) then
+    do i = 1,Nconf
+      do idx = 1,Ngrid(i)
+        if(in_interaction_belt(gridval(i,:,idx),vdw_grid_min_cutoff, &
+           vdw_grid_max_cutoff,i)) then
             Nfar = Nfar + 1
-            currerror = (esp_grid2(idx) - esp_grid(idx))**2 
+            currerror = (esp_grid2(idx) - esp_grid(i,idx))**2 
             rmse_far = rmse_far + currerror  
             if(currerror > maxerror) maxerror = currerror
         end if
+      end do
     end do
     if(Nfar > 0)  write(*,'(A11,F6.2,A13,2ES23.9,I10)') "Far-range (", &
            vdw_grid_min_cutoff," < r)", &
@@ -1936,12 +2154,14 @@ end function mae_qtot
 real(rp) function mae(q)
     implicit none
     real(rp), dimension(:) :: q ! input charges
-    integer :: idx
+    integer :: idx,i
     mae = 0._rp
-    do idx = 1,Ngrid
-        mae = mae + abs(coulomb_potential(gridval(:,idx),q) - esp_grid(idx))
+    do i=1,Nconf
+      do idx = 1,Ngrid(i)
+        mae = mae + abs(coulomb_potential(gridval(i,:,idx),q) - esp_grid(i,idx))
+      end do
     end do
-    mae = mae/Ngridr
+    mae = mae/NgridrTot
 end function mae
 !-------------------------------------------------------------------------------
 
@@ -1970,11 +2190,13 @@ real(rp) function max_ae(q)
     implicit none
     real(rp), dimension(:) :: q ! input charges
     real(rp) :: ae
-    integer :: idx
+    integer :: idx,i
     max_ae = -vbig
-    do idx = 1,Ngrid
-        ae = abs(coulomb_potential(gridval(:,idx),q) - esp_grid(idx))
+    do i=1,Nconf
+      do idx = 1,Ngrid(i)
+        ae = abs(coulomb_potential(gridval(i,:,idx),q) - esp_grid(i,idx))
         if(ae > max_ae) max_ae = ae
+      end do
     end do
 end function max_ae
 !-------------------------------------------------------------------------------
@@ -2048,7 +2270,7 @@ real(rp) function coulomb_potential_multipole(x,mp)
     !precalculate distances and vectors for all atoms, as well as the total charge
     qsum = 0._rp
     do a = 1,Natom
-        r(:,a) = x - atom_pos(:,a)
+        r(:,a) = x - atom_pos(1,:,a)
         rmag(a) = sqrt(sum(r(:,a)**2))
         r(:,a) = r(:,a)/rmag(a)
         if((lcur == 0).and.(a < Natom)) qsum = qsum + mp(a) ! add charge to total charge
@@ -2089,7 +2311,7 @@ real(rp) function coulomb_potential_single_multipole(x,mp,a)
     integer :: idx, l, m, i
     
     !precalculate distance
-    r = x - atom_pos(:,a)
+    r = x - atom_pos(1,:,a)
     rmag = sqrt(sum(r**2))
     r = r/rmag
 
@@ -2115,19 +2337,19 @@ end function coulomb_potential_single_multipole
 ! checks whether a point is inside the interaction belt as defined by the vdW radii
 ! Atomic Multipoles: Electrostatic Potential Fit, Local Reference Axis Systems,
 ! and Conformational Dependence
-logical function in_interaction_belt(q,mincut,maxcut)
+logical function in_interaction_belt(q,mincut,maxcut,lconf)
     implicit none
     real(rp), dimension(:) :: q
     real(rp) :: r, rmin ! shortest distance to atom
     real(rp) :: mincut, maxcut ! minimum and maximum grid cut-offs passed
-    integer  :: i, a, b
+    integer  :: i, a, b, lconf
     ! loop over the coordinates of the point q
     do i = 1,size(q,dim=1),4
         !first check we're not inside the molecule
         !find atom with minimal relative distance
         rmin = vbig
         do a = 1,Natom
-            r = sqrt(sum((atom_pos(:,a)-q(i:i+2))**2))/(vdW_radius(atom_num(a)))
+            r = sqrt(sum((atom_pos(lconf,:,a)-q(i:i+2))**2))/(vdW_radius(atom_num(a)))
             if(r .lt. rmin) then
               rmin = r
             endif
@@ -2141,7 +2363,7 @@ logical function in_interaction_belt(q,mincut,maxcut)
         rmin = vbig
         do b = 1,natmfit
             a = fitatoms(b)
-            r = sqrt(sum((atom_pos(:,a)-q(i:i+2))**2))/(vdW_radius(atom_num(a)))
+            r = sqrt(sum((atom_pos(lconf,:,a)-q(i:i+2))**2))/(vdW_radius(atom_num(a)))
             if(r .lt. rmin) then
               rmin = r
             endif
@@ -2166,7 +2388,8 @@ subroutine init_search_range()
 
     do b = 1,natmfit
       a = fitatoms(b)
-      fitatom_pos(:,b) = atom_pos(:,a)
+      !1st conformer is reference
+      fitatom_pos(:,b) = atom_pos(1,:,a)
     end do
     
     x_min = minval(fitatom_pos(1,:)) - max_extend
@@ -2230,8 +2453,8 @@ subroutine init_pop(pop)
             call random_number(ran)
             ranvec = ran*vdW_scaling*vdW_radius(atom_num(a))*ranvec
             
-            ! set charge position
-            pop(d:d+2,p) = atom_pos(:,a) + ranvec
+            ! set charge position, 1st conformer is reference
+            pop(d:d+2,p) = atom_pos(1,:,a) + ranvec
             
             ! set charge magnitude
             if(d+3 < qdim) then ! in case we use constraint charges
@@ -2364,7 +2587,7 @@ subroutine init_pop_multipole(pop)
             ranvec = ran*vdW_scaling*vdW_radius(atom_num(a))*ranvec
             
             ! set charge position
-            pop(d:d+2,p) = atom_pos(:,a) + ranvec
+            pop(d:d+2,p) = atom_pos(1,:,a) + ranvec
             
             ! set charge magnitude
             if(d+3 < qdim) then ! in case we use constraint charges
@@ -2565,7 +2788,7 @@ open(30, file=trim(input_xyzfile), status="old", action="read", iostat = ios)
 if(ios /= 0) call throw_error('Could not open "'//trim(input_xyzfile)//'" for reading')
 read(30,*,iostat=ios) num_charges
 qdim = 4*num_charges-1
-if((ios /= 0).or.(num_charges < 1)) call throw_error('"'//trim(input_xyzfile)//'" hast the wrong format.')
+if((ios /= 0).or.(num_charges < 1)) call throw_error('"'//trim(input_xyzfile)//'" has the wrong format.')
 if(.not.allocated(charges)) allocate(charges(4*num_charges-1))
 read(30,*,iostat=ios) !skip comment line
 total_charge  = 0._rp
@@ -2581,6 +2804,14 @@ do i = 1,qdim,4
     charges(i:i+2) = charges(i:i+2)*angstrom2bohr
     !print*, charges(i:i+2)
 end do
+
+if(verbose)then
+  write(*,*) 'Read ',trim(input_xyzfile)
+  write(*,*) num_charges,' charges'
+  write(*,*) 'Total charge: ',total_charge
+  write(*,*)
+end if
+
 end subroutine read_xyz_file
 !-------------------------------------------------------------------------------
 
@@ -2711,32 +2942,37 @@ end subroutine write_multipole_file
 
 !-------------------------------------------------------------------------------
 ! writes files for plotting in R, used in analysis mode
-subroutine write_image_slice_data_analysis()
+subroutine write_image_slice_data_analysis(lconf)
     implicit none
-    integer :: i,j,ios
+    integer :: i,j,ios,lconf
+    character(len=80) tfile
     
     !write XY slices
-    open(30, file="slices/sliceXY.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/sliceXY_conf',lconf,'.csv'
+    open(30, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/sliceXY.csv" for writing')
-    open(31, file="slices/truesliceXY.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/truesliceXY_conf',lconf,'.csv'
+    open(31, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/truesliceXY.csv" for writing')
-    open(32, file="slices/fullsliceXY.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/fullsliceXY_conf',lconf,'.csv'
+    open(32, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/fullsliceXY.csv" for writing')
-    open(33, file="slices/truefullsliceXY.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/truefullsliceXY_conf',lconf,'.csv'
+    open(33, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/truefullsliceXY.csv" for writing')
-    do i = 1,NgridX
-        do j = 1,NgridY
+    do i = 1,NgridX(lconf)
+        do j = 1,NgridY(lconf)
             !determine whether to write value or not
-            if(usedXY(i,j)) then 
-                write(30,'(ES13.5,A)', advance='no') sliceXY(i,j),','
-                write(31,'(ES13.5,A)', advance='no') sliceXY2(i,j),','
+            if(usedXY(lconf,i,j)) then 
+                write(30,'(ES13.5,A)', advance='no') sliceXY(lconf,i,j),','
+                write(31,'(ES13.5,A)', advance='no') sliceXY2(lconf,i,j),','
             else
                 write(30,'(A)', advance='no') 'NA,'
                 write(31,'(A)', advance='no') 'NA,'
             end if
             !full slices are always written
-            write(32,'(ES13.5,A)', advance='no') sliceXY(i,j),','
-            write(33,'(ES13.5,A)', advance='no') sliceXY2(i,j),','
+            write(32,'(ES13.5,A)', advance='no') sliceXY(lconf,i,j),','
+            write(33,'(ES13.5,A)', advance='no') sliceXY2(lconf,i,j),','
         end do
         write(30,*) !line break
         write(31,*) !line break
@@ -2749,27 +2985,31 @@ subroutine write_image_slice_data_analysis()
     close(33)
     
     !write XZ slices
-    open(30, file="slices/sliceXZ.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/sliceXZ_conf',lconf,'.csv'
+    open(30, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/sliceXZ.csv" for writing')
-    open(31, file="slices/truesliceXZ.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/truesliceXZ_conf',lconf,'.csv'
+    open(31, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/truesliceXZ.csv" for writing')
-    open(32, file="slices/fullsliceXZ.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/fullsliceXZ_conf',lconf,'.csv'
+    open(32, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/fullsliceXZ.csv" for writing')
-    open(33, file="slices/truefullsliceXZ.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/truefullsliceXZ_conf',lconf,'.csv'
+    open(33, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/truefullsliceXZ.csv" for writing')
-    do i = 1,NgridX
-        do j = 1,NgridZ
+    do i = 1,NgridX(lconf)
+        do j = 1,NgridZ(lconf)
             !determine whether to write value or not
-            if(usedXZ(i,j)) then 
-                write(30,'(ES13.5,A)', advance='no') sliceXZ(i,j),','
-                write(31,'(ES13.5,A)', advance='no') sliceXZ2(i,j),','
+            if(usedXZ(lconf,i,j)) then 
+                write(30,'(ES13.5,A)', advance='no') sliceXZ(lconf,i,j),','
+                write(31,'(ES13.5,A)', advance='no') sliceXZ2(lconf,i,j),','
             else
                 write(30,'(A)', advance='no') 'NA,'
                 write(31,'(A)', advance='no') 'NA,'
             end if
             !full slices are always written
-            write(32,'(ES13.5,A)', advance='no') sliceXZ(i,j),','
-            write(33,'(ES13.5,A)', advance='no') sliceXZ2(i,j),','
+            write(32,'(ES13.5,A)', advance='no') sliceXZ(lconf,i,j),','
+            write(33,'(ES13.5,A)', advance='no') sliceXZ2(lconf,i,j),','
         end do
         write(30,*) !line break
         write(31,*) !line break
@@ -2782,27 +3022,31 @@ subroutine write_image_slice_data_analysis()
     close(33)  
     
     !write YZ slices
-    open(30, file="slices/sliceYZ.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/sliceYZ_conf',lconf,'.csv'
+    open(30, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/sliceYZ.csv" for writing')
-    open(31, file="slices/truesliceYZ.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/truesliceYZ_conf',lconf,'.csv'
+    open(31, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/truesliceYZ.csv" for writing')
-    open(32, file="slices/fullsliceYZ.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/fullsliceYZ_conf',lconf,'.csv'
+    open(32, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/fullsliceYZ.csv" for writing')
-    open(33, file="slices/truefullsliceYZ.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/truefullsliceYZ_conf',lconf,'.csv'
+    open(33, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/truefullsliceYZ.csv" for writing')
-    do i = 1,NgridY
-        do j = 1,NgridZ
+    do i = 1,NgridY(lconf)
+        do j = 1,NgridZ(lconf)
             !determine whether to write value or not
-            if(usedYZ(i,j)) then 
-                write(30,'(ES13.5,A)', advance='no') sliceYZ(i,j),','
-                write(31,'(ES13.5,A)', advance='no') sliceYZ2(i,j),','
+            if(usedYZ(lconf,i,j)) then 
+                write(30,'(ES13.5,A)', advance='no') sliceYZ(lconf,i,j),','
+                write(31,'(ES13.5,A)', advance='no') sliceYZ2(lconf,i,j),','
             else
                 write(30,'(A)', advance='no') 'NA,'
                 write(31,'(A)', advance='no') 'NA,'
             end if
             !full slices are always written
-            write(32,'(ES13.5,A)', advance='no') sliceYZ(i,j),','
-            write(33,'(ES13.5,A)', advance='no') sliceYZ2(i,j),','
+            write(32,'(ES13.5,A)', advance='no') sliceYZ(lconf,i,j),','
+            write(33,'(ES13.5,A)', advance='no') sliceYZ2(lconf,i,j),','
         end do
         write(30,*) !line break
         write(31,*) !line break
@@ -2820,35 +3064,41 @@ end subroutine write_image_slice_data_analysis
 
 !-------------------------------------------------------------------------------
 ! writes files for plotting in R
-subroutine write_image_slice_data(charges)
+subroutine write_image_slice_data(charges,lconf)
     implicit none
     real(rp), dimension(qdim) :: charges
     real(rp), dimension(3) :: x ! position
-    integer :: i,j,ios
+    integer :: i,j,ios,lconf
+    character(len=80) tfile
     
     !write XY slices
-    open(30, file="slices/sliceXY.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/sliceXY_conf',lconf,'.csv'
+    open(30, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/sliceXY.csv" for writing')
-    open(31, file="slices/truesliceXY.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/truesliceXY_conf',lconf,'.csv'
+    open(31, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/truesliceXY.csv" for writing')
-    open(32, file="slices/fullsliceXY.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/fullsliceXY_conf',lconf,'.csv'
+    open(32, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/fullsliceXY.csv" for writing')
-    open(33, file="slices/truefullsliceXY.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/truefullsliceXY_conf',lconf,'.csv'
+    open(33, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/truefullsliceXY.csv" for writing')
-    do i = 1,NgridX
-        do j = 1,NgridY
-            x = origin + (i-1)*axisX + (j-1)*axisY + (NgridZ/2-1)*axisZ
+    do i = 1,NgridX(lconf)
+        do j = 1,NgridY(lconf)
+            x = origin(lconf,:) + (i-1)*axisX(lconf,:) + (j-1)*axisY(lconf,:) + &
+               (NgridZ(lconf)/2-1)*axisZ(lconf,:)
             !determine whether to write value or not
-            if(usedXY(i,j)) then 
+            if(usedXY(lconf,i,j)) then 
                 write(30,'(ES13.5,A)', advance='no') coulomb_potential_qtot(x,charges),','
-                write(31,'(ES13.5,A)', advance='no') sliceXY(i,j),','
+                write(31,'(ES13.5,A)', advance='no') sliceXY(lconf,i,j),','
             else
                 write(30,'(A)', advance='no') 'NA,'
                 write(31,'(A)', advance='no') 'NA,'
             end if
             !full slices are always written
             write(32,'(ES13.5,A)', advance='no') coulomb_potential_qtot(x,charges),','
-            write(33,'(ES13.5,A)', advance='no') sliceXY(i,j),','
+            write(33,'(ES13.5,A)', advance='no') sliceXY(lconf,i,j),','
         end do
         write(30,*) !line break
         write(31,*) !line break
@@ -2861,28 +3111,33 @@ subroutine write_image_slice_data(charges)
     close(33)
     
     !write XZ slices
-    open(30, file="slices/sliceXZ.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/sliceXZ_conf',lconf,'.csv'
+    open(30, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/sliceXZ.csv" for writing')
-    open(31, file="slices/truesliceXZ.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/truesliceXZ_conf',lconf,'.csv'
+    open(31, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/truesliceXZ.csv" for writing')
-    open(32, file="slices/fullsliceXZ.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/fullsliceXZ_conf',lconf,'.csv'
+    open(32, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/fullsliceXZ.csv" for writing')
-    open(33, file="slices/truefullsliceXZ.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/truefullsliceXZ_conf',lconf,'.csv'
+    open(33, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/truefullsliceXZ.csv" for writing')
-    do i = 1,NgridX
-        do j = 1,NgridZ
-            x = origin + (i-1)*axisX + (NgridY/2-1)*axisY + (j-1)*axisZ
+    do i = 1,NgridX(lconf)
+        do j = 1,NgridZ(lconf)
+            x = origin(lconf,:) + (i-1)*axisX(lconf,:) + (NgridY(lconf)/2-1)*axisY(lconf,:) + &
+                (j-1)*axisZ(lconf,:)
             !determine whether to write value or not
-            if(usedXZ(i,j)) then 
+            if(usedXZ(lconf,i,j)) then 
                 write(30,'(ES13.5,A)', advance='no') coulomb_potential_qtot(x,charges),','
-                write(31,'(ES13.5,A)', advance='no') sliceXZ(i,j),','
+                write(31,'(ES13.5,A)', advance='no') sliceXZ(lconf,i,j),','
             else
                 write(30,'(A)', advance='no') 'NA,'
                 write(31,'(A)', advance='no') 'NA,'
             end if
             !full slices are always written
             write(32,'(ES13.5,A)', advance='no') coulomb_potential_qtot(x,charges),','
-            write(33,'(ES13.5,A)', advance='no') sliceXZ(i,j),','
+            write(33,'(ES13.5,A)', advance='no') sliceXZ(lconf,i,j),','
         end do
         write(30,*) !line break
         write(31,*) !line break
@@ -2895,28 +3150,33 @@ subroutine write_image_slice_data(charges)
     close(33)  
     
     !write YZ slices
-    open(30, file="slices/sliceYZ.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/sliceYZ_conf',lconf,'.csv'
+    open(30, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/sliceYZ.csv" for writing')
-    open(31, file="slices/truesliceYZ.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/truesliceYZ_conf',lconf,'.csv'
+    open(31, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/truesliceYZ.csv" for writing')
-    open(32, file="slices/fullsliceYZ.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/fullsliceYZ_conf',lconf,'.csv'
+    open(32, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/fullsliceYZ.csv" for writing')
-    open(33, file="slices/truefullsliceYZ.csv", status="replace", action="write", iostat = ios)
+    write(tfile,'(A,I4.4,A)') 'slices/truefullsliceYZ_conf',lconf,'.csv'
+    open(33, file=trim(tfile), status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/truefullsliceYZ.csv" for writing')
-    do i = 1,NgridY
-        do j = 1,NgridZ
-            x = origin + (NgridX/2-1)*axisX + (i-1)*axisY + (j-1)*axisZ
+    do i = 1,NgridY(lconf)
+        do j = 1,NgridZ(lconf)
+            x = origin(lconf,:) + (NgridX(lconf)/2-1)*axisX(lconf,:) + (i-1)*axisY(lconf,:) + &
+                (j-1)*axisZ(lconf,:)
             !determine whether to write value or not
-            if(usedYZ(i,j)) then 
+            if(usedYZ(lconf,i,j)) then 
                 write(30,'(ES13.5,A)', advance='no') coulomb_potential_qtot(x,charges),','
-                write(31,'(ES13.5,A)', advance='no') sliceYZ(i,j),','
+                write(31,'(ES13.5,A)', advance='no') sliceYZ(lconf,i,j),','
             else
                 write(30,'(A)', advance='no') 'NA,'
                 write(31,'(A)', advance='no') 'NA,'
             end if
             !full slices are always written
             write(32,'(ES13.5,A)', advance='no') coulomb_potential_qtot(x,charges),','
-            write(33,'(ES13.5,A)', advance='no') sliceYZ(i,j),','
+            write(33,'(ES13.5,A)', advance='no') sliceYZ(lconf,i,j),','
         end do
         write(30,*) !line break
         write(31,*) !line break
@@ -2948,20 +3208,20 @@ subroutine write_image_slice_data_multipole(multipole)
     if(ios /= 0) call throw_error('Could not open "slices/fullsliceXY.csv" for writing')
     open(33, file="slices/truefullsliceXY.csv", status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/truefullsliceXY.csv" for writing')
-    do i = 1,NgridX
-        do j = 1,NgridY
-            x = origin + (i-1)*axisX + (j-1)*axisY + (NgridZ/2-1)*axisZ
+    do i = 1,NgridX(1)
+        do j = 1,NgridY(1)
+            x = origin(1,:) + (i-1)*axisX(1,:) + (j-1)*axisY(1,:) + (NgridZ(1)/2-1)*axisZ(1,:)
             !determine whether to write value or not
-            if(usedXY(i,j)) then 
+            if(usedXY(1,i,j)) then 
                 write(30,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole),','
-                write(31,'(ES13.5,A)', advance='no') sliceXY(i,j),','
+                write(31,'(ES13.5,A)', advance='no') sliceXY(1,i,j),','
             else
                 write(30,'(A)', advance='no') 'NA,'
                 write(31,'(A)', advance='no') 'NA,'
             end if
             !full slices are always written
             write(32,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole),','
-            write(33,'(ES13.5,A)', advance='no') sliceXY(i,j),','
+            write(33,'(ES13.5,A)', advance='no') sliceXY(1,i,j),','
         end do
         write(30,*) !line break
         write(31,*) !line break
@@ -2982,20 +3242,20 @@ subroutine write_image_slice_data_multipole(multipole)
     if(ios /= 0) call throw_error('Could not open "slices/fullsliceXZ.csv" for writing')
     open(33, file="slices/truefullsliceXZ.csv", status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/truefullsliceXZ.csv" for writing')
-    do i = 1,NgridX
-        do j = 1,NgridZ
-            x = origin + (i-1)*axisX + (NgridY/2-1)*axisY + (j-1)*axisZ
+    do i = 1,NgridX(1)
+        do j = 1,NgridZ(1)
+            x = origin(1,:) + (i-1)*axisX(1,:) + (NgridY(1)/2-1)*axisY(1,:) + (j-1)*axisZ(1,:)
             !determine whether to write value or not
-            if(usedXZ(i,j)) then 
+            if(usedXZ(1,i,j)) then 
                 write(30,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole),','
-                write(31,'(ES13.5,A)', advance='no') sliceXZ(i,j),','
+                write(31,'(ES13.5,A)', advance='no') sliceXZ(1,i,j),','
             else
                 write(30,'(A)', advance='no') 'NA,'
                 write(31,'(A)', advance='no') 'NA,'
             end if
             !full slices are always written
             write(32,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole),','
-            write(33,'(ES13.5,A)', advance='no') sliceXZ(i,j),','
+            write(33,'(ES13.5,A)', advance='no') sliceXZ(1,i,j),','
         end do
         write(30,*) !line break
         write(31,*) !line break
@@ -3016,20 +3276,20 @@ subroutine write_image_slice_data_multipole(multipole)
     if(ios /= 0) call throw_error('Could not open "slices/fullsliceYZ.csv" for writing')
     open(33, file="slices/truefullsliceYZ.csv", status="replace", action="write", iostat = ios)
     if(ios /= 0) call throw_error('Could not open "slices/truefullsliceYZ.csv" for writing')
-    do i = 1,NgridY
-        do j = 1,NgridZ
-            x = origin + (NgridX/2-1)*axisX + (i-1)*axisY + (j-1)*axisZ
+    do i = 1,NgridY(1)
+        do j = 1,NgridZ(1)
+            x = origin(1,:) + (NgridX(1)/2-1)*axisX(1,:) + (i-1)*axisY(1,:) + (j-1)*axisZ(1,:)
             !determine whether to write value or not
-            if(usedYZ(i,j)) then 
+            if(usedYZ(1,i,j)) then 
                 write(30,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole),','
-                write(31,'(ES13.5,A)', advance='no') sliceYZ(i,j),','
+                write(31,'(ES13.5,A)', advance='no') sliceYZ(1,i,j),','
             else
                 write(30,'(A)', advance='no') 'NA,'
                 write(31,'(A)', advance='no') 'NA,'
             end if
             !full slices are always written
             write(32,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole),','
-            write(33,'(ES13.5,A)', advance='no') sliceYZ(i,j),','
+            write(33,'(ES13.5,A)', advance='no') sliceYZ(1,i,j),','
         end do
         write(30,*) !line break
         write(31,*) !line break
@@ -3058,26 +3318,27 @@ if(ios /= 0) call throw_error('Could not open "'//trim(outfile)//'" for writing'
 !write header
 write(30,'(1X,A)')       "Error surface"
 write(30,'(1X,A,I0,A)')  "Difference of true and fitted electrostatic potential"
-write(30,'(I5,3(F12.6),I5)') Natom, origin, 1
-write(30,'(I5,3(F12.6))')    NgridX, axisX
-write(30,'(I5,3(F12.6))')    NgridY, axisY
-write(30,'(I5,3(F12.6))')    NgridZ, axisZ
+write(30,'(I5,3(F12.6),I5)') Natom, origin(1,:), 1
+write(30,'(I5,3(F12.6))')    NgridX(1), axisX(1,:)
+write(30,'(I5,3(F12.6))')    NgridY(1), axisY(1,:)
+write(30,'(I5,3(F12.6))')    NgridZ(1), axisZ(1,:)
 do i = 1,Natom
-    write(30,'(I5,4(F12.6))') atom_num(i),real(atom_num(i),rp),atom_pos(:,i)
+    !only 1 conformer allowed in analysis mode for now
+    write(30,'(I5,4(F12.6))') atom_num(i),real(atom_num(i),rp),atom_pos(1,:,i)
 end do
 !write grid data
 lcount = 0
 idx = 0
-do i = 1,NgridX
-    do j = 1,NgridY
-        do k = 1,NgridZ
+do i = 1,NgridX(1)
+    do j = 1,NgridY(1)
+        do k = 1,NgridZ(1)
             idx = idx + 1
             lcount = lcount + 1
-            write(30,'(ES13.5)', advance='no') esp_grid2(idx)-esp_grid(idx)
+            write(30,'(ES13.5)', advance='no') esp_grid2(idx)-esp_grid(1,idx)
             !to accomodate weird format, we sometimes have to skip lines
-            if(mod(lcount,6) == 0 .or. mod(lcount,NgridZ) == 0) then
+            if(mod(lcount,6) == 0 .or. mod(lcount,NgridZ(1)) == 0) then
                 write(30,*) ! line break
-                if(mod(lcount,NgridZ) == 0) lcount = 0
+                if(mod(lcount,NgridZ(1)) == 0) lcount = 0
             end if
         end do
     end do
@@ -3090,13 +3351,13 @@ end subroutine write_error_cube_file
 
 !-------------------------------------------------------------------------------
 ! writes a cube file containing the esp for direct comparison
-subroutine write_cube_file(charges,multipole)
+subroutine write_cube_file(charges,lconf,multipole)
 implicit none 
 character(len=1024) outfile, dummy
 real(rp), dimension(qdim) :: charges
 real(rp) :: x(3) ! dummy vector
 integer, optional :: multipole
-integer :: i,j,k,lcount,ios
+integer :: i,j,k,lcount,ios,lconf
 
 if(present(multipole)) then
     write(dummy,'(I0)') multipole
@@ -3111,31 +3372,35 @@ else
     end if
 end if
 
-print*,'writing cube file ',outfile
+if(verbose) then
+  write(*,*) 'writing cube file ',trim(outfile)
+  write(*,*)
+end if
 open(30, file=trim(outfile), status="replace", action="write", iostat = ios)
 if(ios /= 0) call throw_error('Could not open "'//trim(outfile)//'" for writing')
 !write header
 write(30,'(1X,A)')       "Fitted ESP"
 write(30,'(1X,A,I0,A)')  "Electrostatic potential fitted from ",num_charges," point charges."
-write(30,'(I5,3(F12.6),I5)') Natom, origin, 1
-write(30,'(I5,3(F12.6))')    NgridX, axisX
-write(30,'(I5,3(F12.6))')    NgridY, axisY
-write(30,'(I5,3(F12.6))')    NgridZ, axisZ
+write(30,'(I5,3(F12.6),I5)') Natom, origin(lconf,:), 1
+write(30,'(I5,3(F12.6))')    NgridX(lconf), axisX(lconf,:)
+write(30,'(I5,3(F12.6))')    NgridY(lconf), axisY(lconf,:)
+write(30,'(I5,3(F12.6))')    NgridZ(lconf), axisZ(lconf,:)
 do i = 1,Natom
-    write(30,'(I5,4(F12.6))') atom_num(i),real(atom_num(i),rp),atom_pos(:,i)
+    write(30,'(I5,4(F12.6))') atom_num(i),real(atom_num(i),rp),atom_pos(lconf,:,i)
 end do
 !write grid data
 lcount = 0
-do i = 1,NgridX
-    do j = 1,NgridY
-        do k = 1,NgridZ
+do i = 1,NgridX(lconf)
+    do j = 1,NgridY(lconf)
+        do k = 1,NgridZ(lconf)
             lcount = lcount + 1
-            x = origin + (i-1)*axisX + (j-1)*axisY + (k-1)*axisZ
+            x = origin(lconf,:) + (i-1)*axisX(lconf,:) + (j-1)*axisY(lconf,:) + & 
+                (k-1)*axisZ(lconf,:)
             write(30,'(ES13.5)', advance='no') coulomb_potential_qtot(x,charges(1:qdim))
             !to accomodate weird format, we sometimes have to skip lines
-            if(mod(lcount,6) == 0 .or. mod(lcount,NgridZ) == 0) then
+            if(mod(lcount,6) == 0 .or. mod(lcount,NgridZ(lconf)) == 0) then
                 write(30,*) ! line break
-                if(mod(lcount,NgridZ) == 0) lcount = 0
+                if(mod(lcount,NgridZ(lconf)) == 0) lcount = 0
             end if
         end do
     end do
@@ -3183,20 +3448,20 @@ if(ios /= 0) call throw_error('Could not open "'//trim(outfile)//'" for writing'
 !write header
 write(30,'(1X,A)')       "Fitted ESP"
 write(30,'(1X,A,I0,A)')  "Electrostatic potential fitted from "//trim(dummy)//" expansion."
-write(30,'(I5,3(F12.6),I5)') Natom, origin, 1
-write(30,'(I5,3(F12.6))')    NgridX, axisX
-write(30,'(I5,3(F12.6))')    NgridY, axisY
-write(30,'(I5,3(F12.6))')    NgridZ, axisZ
+write(30,'(I5,3(F12.6),I5)') Natom, origin(1,:), 1
+write(30,'(I5,3(F12.6))')    NgridX(1), axisX(1,:)
+write(30,'(I5,3(F12.6))')    NgridY(1), axisY(1,:)
+write(30,'(I5,3(F12.6))')    NgridZ(1), axisZ(1,:)
 do i = 1,Natom
-    write(30,'(I5,4(F12.6))') atom_num(i),real(atom_num(i),rp),atom_pos(:,i)
+    write(30,'(I5,4(F12.6))') atom_num(i),real(atom_num(i),rp),atom_pos(1,:,i)
 end do
 !write grid data
 lcount = 0
-do i = 1,NgridX
-    do j = 1,NgridY
-        do k = 1,NgridZ
+do i = 1,NgridX(1)
+    do j = 1,NgridY(1)
+        do k = 1,NgridZ(1)
             lcount = lcount + 1
-            x = origin + (i-1)*axisX + (j-1)*axisY + (k-1)*axisZ
+            x = origin(1,:) + (i-1)*axisX(1,:) + (j-1)*axisY(1,:) + (k-1)*axisZ(1,:)
             if(natmfit < Natom) then
               vtot=0._rp
               do b=1,natmfit
@@ -3208,9 +3473,9 @@ do i = 1,NgridX
             end if
             write(30,'(ES13.5)', advance='no') vtot
             !to accomodate weird format, we sometimes have to skip lines
-            if(mod(lcount,6) == 0 .or. mod(lcount,NgridZ) == 0) then
+            if(mod(lcount,6) == 0 .or. mod(lcount,NgridZ(1)) == 0) then
                 write(30,*) ! line break
-                if(mod(lcount,NgridZ) == 0) lcount = 0
+                if(mod(lcount,NgridZ(1)) == 0) lcount = 0
             end if
         end do
     end do
@@ -3228,26 +3493,29 @@ subroutine calc_multipole_grid_and_slice_data(mp,a)
     integer :: i,j
     
     !calculate the esp grid generated from just this multipole
-    do i = 1,Ngrid
-        esp_grid(i) = coulomb_potential_single_multipole(gridval(:,i),mp,a) 
+    do i = 1,Ngrid(1)
+        esp_grid(1,i) = coulomb_potential_single_multipole(gridval(1,:,i),mp,a) 
     end do
     
     !calculate the slice data from just this multipole
-    do i = 1,NgridX
-        do j = 1,NgridY
-                sliceXY(i,j) = coulomb_potential_single_multipole(origin + (i-1)*axisX + (j-1)*axisY + (NgridZ/2-1)*axisZ,mp,a)             
+    do i = 1,NgridX(1)
+        do j = 1,NgridY(1)
+                sliceXY(1,i,j) = coulomb_potential_single_multipole(origin(1,:) + &
+                   (i-1)*axisX(1,:) + (j-1)*axisY(1,:) + (NgridZ(1)/2-1)*axisZ(1,:),mp,a)
         end do
     end do
     
-    do i = 1,NgridX
-        do j = 1,NgridZ
-                sliceXZ(i,j) = coulomb_potential_single_multipole(origin + (i-1)*axisX + (NgridY/2-1)*axisY + (j-1)*axisZ,mp,a)             
+    do i = 1,NgridX(1)
+        do j = 1,NgridZ(1)
+                sliceXZ(1,i,j) = coulomb_potential_single_multipole(origin(1,:) + &
+                   (i-1)*axisX(1,:) + (NgridY(1)/2-1)*axisY(1,:) + (j-1)*axisZ(1,:),mp,a)
         end do
     end do
     
-    do i = 1,NgridY
-        do j = 1,NgridZ
-                sliceYZ(i,j) = coulomb_potential_single_multipole(origin + (NgridX/2-1)*axisX + (i-1)*axisY + (j-1)*axisZ,mp,a)             
+    do i = 1,NgridY(1)
+        do j = 1,NgridZ(1)
+                sliceYZ(1,i,j) = coulomb_potential_single_multipole(origin(1,:) + &
+                    (NgridX(1)/2-1)*axisX(1,:) + (i-1)*axisY(1,:) + (j-1)*axisZ(1,:),mp,a)
         end do
     end do
     
@@ -3263,33 +3531,78 @@ subroutine subtract_atom_multipole_ESP_from_grid(mp,a)
 
     !calculate the esp grid generated from just this multipole and subtract from
     !total
-    do i = 1,Ngrid
-        esp_grid(i) = esp_grid(i) - coulomb_potential_single_multipole(gridval(:,i),mp,a)
+    do i = 1,Ngrid(1)
+        esp_grid(1,i) = esp_grid(1,i) - coulomb_potential_single_multipole(gridval(1,:,i),mp,a)
     end do
 
     !calculate the slice data from just this multipole
-    do i = 1,NgridX
-        do j = 1,NgridY
-                sliceXY(i,j) = sliceXY(i,j) - coulomb_potential_single_multipole( &
-                     origin + (i-1)*axisX + (j-1)*axisY + (NgridZ/2-1)*axisZ,mp,a)
+    do i = 1,NgridX(1)
+        do j = 1,NgridY(1)
+                sliceXY(1,i,j) = sliceXY(1,i,j) - coulomb_potential_single_multipole( &
+                     origin(1,:) + (i-1)*axisX(1,:) + (j-1)*axisY(1,:) + &
+                     (NgridZ(1)/2-1)*axisZ(1,:),mp,a)
         end do
     end do
 
-    do i = 1,NgridX
-        do j = 1,NgridZ
-                sliceXZ(i,j) = sliceXZ(i,j) - coulomb_potential_single_multipole( &
-                     origin + (i-1)*axisX + (NgridY/2-1)*axisY + (j-1)*axisZ,mp,a)
+    do i = 1,NgridX(1)
+        do j = 1,NgridZ(1)
+                sliceXZ(1,i,j) = sliceXZ(1,i,j) - coulomb_potential_single_multipole( &
+                     origin(1,:) + (i-1)*axisX(1,:) + (NgridY(1)/2-1)*axisY(1,:) + &
+                     (j-1)*axisZ(1,:),mp,a)
         end do
     end do
 
-    do i = 1,NgridY
-        do j = 1,NgridZ
-                sliceYZ(i,j) = sliceYZ(i,j) - coulomb_potential_single_multipole( &
-                     origin + (NgridX/2-1)*axisX + (i-1)*axisY + (j-1)*axisZ,mp,a)
+    do i = 1,NgridY(1)
+        do j = 1,NgridZ(1)
+                sliceYZ(1,i,j) = sliceYZ(1,i,j) - coulomb_potential_single_multipole( &
+                     origin(1,:) + (NgridX(1)/2-1)*axisX(1,:) + (i-1)*axisY(1,:) + &
+                     (j-1)*axisZ(1,:),mp,a)
         end do
     end do
 
 end subroutine subtract_atom_multipole_ESP_from_grid
+!-------------------------------------------------------------------------------
+
+!-------------------------------------------------------------------------------
+! Subroutine to subtract the ESP generated by a charge from the reference data
+! (intended for use when freezing charges in the fit)
+subroutine subtract_charge_ESP_from_grid(q,l)
+    implicit none
+    integer :: l !grid to subtract from
+    real(rp), dimension(:) :: q !input charge
+    integer :: i,j
+
+    do i = 1,Ngrid(l)
+        esp_grid(l,i) = esp_grid(l,i) - coulomb_potential(gridval(l,:,i),q)
+    end do
+
+    !calculate the new slice data without this charge
+    do i = 1,NgridX(l)
+        do j = 1,NgridY(l)
+                sliceXY(l,i,j) = sliceXY(l,i,j) - coulomb_potential( &
+                     origin(l,:) + (i-1)*axisX(l,:) + (j-1)*axisY(l,:) + &
+                     (NgridZ(l)/2-1)*axisZ(l,:),q)
+        end do
+    end do
+
+    do i = 1,NgridX(l)
+        do j = 1,NgridZ(l)
+                sliceXZ(l,i,j) = sliceXZ(l,i,j) - coulomb_potential( &
+                     origin(l,:) + (i-1)*axisX(l,:) + (NgridY(l)/2-1)*axisY(l,:) + &
+                     (j-1)*axisZ(l,:),q)
+        end do
+    end do
+
+    do i = 1,NgridY(l)
+        do j = 1,NgridZ(l)
+                sliceYZ(l,i,j) = sliceYZ(l,i,j) - coulomb_potential( &
+                     origin(l,:) + (NgridX(l)/2-1)*axisX(l,:) + (i-1)*axisY(l,:) + &
+                     (j-1)*axisZ(l,:),q)
+        end do
+    end do
+
+end subroutine subtract_charge_ESP_from_grid
+
 !-------------------------------------------------------------------------------
 
 !-------------------------------------------------------------------------------
@@ -3299,31 +3612,34 @@ subroutine add_atom_multipole_ESP_to_grid(mp,a)
     real(rp), dimension(:) :: mp !input multipole
     integer :: i,j
 
-    !calculate the esp grid generated from just this multipole and subtract from
+    !calculate the esp grid generated from just this multipole and add to
     !total
-    do i = 1,Ngrid
-        esp_grid(i) = esp_grid(i) + coulomb_potential_single_multipole(gridval(:,i),mp,a)
+    do i = 1,Ngrid(1)
+        esp_grid(1,i) = esp_grid(1,i) + coulomb_potential_single_multipole(gridval(1,:,i),mp,a)
     end do
 
     !calculate the slice data from just this multipole
-    do i = 1,NgridX
-        do j = 1,NgridY
-                sliceXY(i,j) = sliceXY(i,j) + coulomb_potential_single_multipole( &
-                     origin + (i-1)*axisX + (j-1)*axisY + (NgridZ/2-1)*axisZ,mp,a)
+    do i = 1,NgridX(1)
+        do j = 1,NgridY(1)
+                sliceXY(1,i,j) = sliceXY(1,i,j) + coulomb_potential_single_multipole( &
+                     origin(1,:) + (i-1)*axisX(1,:) + (j-1)*axisY(1,:) + &
+                     (NgridZ(1)/2-1)*axisZ(1,:),mp,a)
         end do
     end do
 
-    do i = 1,NgridX
-        do j = 1,NgridZ
-                sliceXZ(i,j) = sliceXZ(i,j) + coulomb_potential_single_multipole( &
-                     origin + (i-1)*axisX + (NgridY/2-1)*axisY + (j-1)*axisZ,mp,a)
+    do i = 1,NgridX(1)
+        do j = 1,NgridZ(1)
+                sliceXZ(1,i,j) = sliceXZ(1,i,j) + coulomb_potential_single_multipole( &
+                     origin(1,:) + (i-1)*axisX(1,:) + (NgridY(1)/2-1)*axisY(1,:) + &
+                     (j-1)*axisZ(1,:),mp,a)
         end do
     end do
 
-    do i = 1,NgridY
-        do j = 1,NgridZ
-                sliceYZ(i,j) = sliceYZ(i,j) + coulomb_potential_single_multipole( &
-                     origin + (NgridX/2-1)*axisX + (i-1)*axisY +(j-1)*axisZ,mp,a)
+    do i = 1,NgridY(1)
+        do j = 1,NgridZ(1)
+                sliceYZ(1,i,j) = sliceYZ(1,i,j) + coulomb_potential_single_multipole( &
+                     origin(1,:) + (NgridX(1)/2-1)*axisX(1,:) + (i-1)*axisY(1,:) + &
+                     (j-1)*axisZ(1,:),mp,a)
         end do
     end do
 
@@ -3334,15 +3650,17 @@ end subroutine add_atom_multipole_ESP_to_grid
 
 !-------------------------------------------------------------------------------
 ! read Gaussian cube files
-subroutine read_cube_file(filepath,density_filepath)
+subroutine read_cube_file(filepath,density_filepath,lconf)
     implicit none
     character(len=*), intent(in)           :: filepath
     character(len=*), intent(in), optional :: density_filepath !for density cutoff
     character(len=128) :: ctmp ! dummy character variable
     real(rp) :: x(3) ! dummy vector
     real(rp) :: rtmp,rtmp2 ! dummy real variable
+    real(rp), dimension(:,:), allocatable :: tgrid ! temporary grid for resizing arrays
+    real(rp), dimension(:,:,:), allocatable :: tvgrid ! temporary grid for resizing arrays
     integer :: ios ! keeps track of io status
-    integer :: i,j,k,idx,lcount
+    integer :: i,j,k,idx,lcount,lconf,itmp,tNX,tNY,tNZ
     
     if(use_vdW_grid_cutoff .and. use_density_grid_cutoff) &
         call throw_error('Only one grid cutoff scheme can be selected at once.')
@@ -3380,13 +3698,18 @@ subroutine read_cube_file(filepath,density_filepath)
     
     
     ! read information about coordinate system and the number of atoms
-    read(30,*,iostat = ios) Natom, origin(:)
+    read(30,*,iostat = ios) itmp, origin(lconf,:)
     if(ios /= 0) call throw_error('Could not read "'//trim(filepath)//'". Missing Header?')
-    read(30,*,iostat = ios) NgridX, axisX(:)
+    if(lconf == 1) then
+      Natom = itmp
+    else
+      if(itmp /= Natom) call throw_error('different number of atoms in cube file of this conformer')
+    end if
+    read(30,*,iostat = ios) NgridX(lconf), axisX(lconf,:)
     if(ios /= 0) call throw_error('Could not read "'//trim(filepath)//'". Missing Header?')
-    read(30,*,iostat = ios) NgridY, axisY(:)
+    read(30,*,iostat = ios) NgridY(lconf), axisY(lconf,:)
     if(ios /= 0) call throw_error('Could not read "'//trim(filepath)//'". Missing Header?')
-    read(30,*,iostat = ios) NgridZ, axisZ(:)
+    read(30,*,iostat = ios) NgridZ(lconf), axisZ(lconf,:)
     if(ios /= 0) call throw_error('Could not read "'//trim(filepath)//'". Missing Header?')
     if(use_density_grid_cutoff) then ! skip this information in density cube file
         read(31,*,iostat = ios) 
@@ -3408,23 +3731,23 @@ subroutine read_cube_file(filepath,density_filepath)
       enddo
     endif
 
-    if(verbose) write(*,'(I5,3F12.6)') Natom, origin(:)
-    if(verbose) write(*,'(I5,3F12.6)') NgridX, axisX(:)
-    if(verbose) write(*,'(I5,3F12.6)') NgridY, axisY(:)
-    if(verbose) write(*,'(I5,3F12.6)') NgridZ, axisZ(:) 
+    if(verbose) write(*,'(I5,3F12.6)') Natom, origin(lconf,:)
+    if(verbose) write(*,'(I5,3F12.6)') NgridX(lconf), axisX(lconf,:)
+    if(verbose) write(*,'(I5,3F12.6)') NgridY(lconf), axisY(lconf,:)
+    if(verbose) write(*,'(I5,3F12.6)') NgridZ(lconf), axisZ(lconf,:) 
     
     ! allocate memory to store slices through the potential (for visualization with R)
-    if(.not.allocated(sliceXY)) allocate(sliceXY(NgridX,NgridY), stat=ios)
+    if(.not.allocated(sliceXY)) allocate(sliceXY(Nconf,NgridX(lconf),NgridY(lconf)), stat=ios)
     if(ios /= 0) call throw_error('Could not allocate memory for sliceXY.')
-    if(.not.allocated(sliceXZ)) allocate(sliceXZ(NgridX,NgridZ), stat=ios)
+    if(.not.allocated(sliceXZ)) allocate(sliceXZ(Nconf,NgridX(lconf),NgridZ(lconf)), stat=ios)
     if(ios /= 0) call throw_error('Could not allocate memory for sliceXZ.')
-    if(.not.allocated(sliceYZ)) allocate(sliceYZ(NgridY,NgridZ), stat=ios)
+    if(.not.allocated(sliceYZ)) allocate(sliceYZ(Nconf,NgridY(lconf),NgridZ(lconf)), stat=ios)
     if(ios /= 0) call throw_error('Could not allocate memory for sliceYZ.')
-    if(.not.allocated(usedXY))  allocate(usedXY (NgridX,NgridY), stat=ios)
+    if(.not.allocated(usedXY))  allocate(usedXY (Nconf,NgridX(lconf),NgridY(lconf)), stat=ios)
     if(ios /= 0) call throw_error('Could not allocate memory for usedXY.')
-    if(.not.allocated(usedXZ))  allocate(usedXZ (NgridX,NgridZ), stat=ios)
+    if(.not.allocated(usedXZ))  allocate(usedXZ (Nconf,NgridX(lconf),NgridZ(lconf)), stat=ios)
     if(ios /= 0) call throw_error('Could not allocate memory for usedXZ.')
-    if(.not.allocated(usedYZ))  allocate(usedYZ (NgridY,NgridZ), stat=ios)
+    if(.not.allocated(usedYZ))  allocate(usedYZ (Nconf,NgridY(lconf),NgridZ(lconf)), stat=ios)
     if(ios /= 0) call throw_error('Could not allocate memory for usedYZ.')
     usedXY = .true.; usedXZ = .true.; usedYZ = .true.; !initialize to true
     
@@ -3432,14 +3755,18 @@ subroutine read_cube_file(filepath,density_filepath)
     ! allocate memory to store atom information
     if(.not.allocated(atom_num)) allocate(atom_num(Natom),   stat=ios)
     if(ios /= 0) call throw_error('Could not allocate memory.')
-    if(.not.allocated(atom_pos)) allocate(atom_pos(3,Natom), stat=ios)
+    if(.not.allocated(atom_pos)) allocate(atom_pos(Nconf,3,Natom), stat=ios)
     if(ios /= 0) call throw_error('Could not allocate memory.')
     
     ! read atom information
     do i = 1,Natom
-        read(30,*,iostat=ios) atom_num(i), rtmp, atom_pos(:,i)
+        if(lconf>1) itmp = atom_num(i)
+        read(30,*,iostat=ios) atom_num(i), rtmp, atom_pos(lconf,:,i)
         if(ios /= 0) call throw_error('Could not read atom information.')
-        if(verbose) write(*,'(I5,4F12.6)') atom_num(i), real(atom_num(i),rp), atom_pos(:,i)
+        if(lconf>1 .and. itmp /= atom_num(i)) then !this conformer doesn't match original
+          call throw_error('Atom types of this conformer do not match reference conformer')
+        end if
+        if(verbose) write(*,'(I5,4F12.6)') atom_num(i), real(atom_num(i),rp), atom_pos(lconf,:,i)
     end do
     if(use_density_grid_cutoff) then ! skip atom information in density cube file
         do i = 1,Natom
@@ -3447,12 +3774,63 @@ subroutine read_cube_file(filepath,density_filepath)
             if(ios /= 0) call throw_error('Density cube file has unmatching format.')
         end do
     end if
-        
+
     ! allocate memory to store grid information
-    if(.not.allocated(esp_grid)) allocate(esp_grid(NgridX*NgridY*NgridZ), stat=ios)
+    if(.not.allocated(esp_grid)) allocate(esp_grid(Nconf,NgridX(lconf)*NgridY(lconf)*NgridZ(lconf)), stat=ios) ! for 1st conformer
     if(ios /= 0) call throw_error('Could not allocate memory.')
-    if(.not.allocated(gridval))  allocate(gridval(3,NgridX*NgridY*NgridZ),stat=ios)
+    if(.not.allocated(gridval))  allocate(gridval(Nconf,3,NgridX(lconf)*NgridY(lconf)*NgridZ(lconf)),stat=ios)
     if(ios /= 0) call throw_error('Could not allocate memory.')
+
+    if(lconf>1) then ! reallocate esp_grid etc. to hold another conformer if necessary
+      itmp=size(esp_grid,dim=2)
+      if(NgridX(lconf)*NgridY(lconf)*NgridZ(lconf) > itmp) then
+        allocate(tgrid(Nconf,size(esp_grid,dim=2))) ! to hold esp_grid for resizing
+        allocate(tvgrid(Nconf,3,size(esp_grid,dim=2)))
+        tgrid=esp_grid
+        tvgrid=gridval
+        deallocate(esp_grid,gridval)
+        allocate(esp_grid(Nconf,NgridX(lconf)*NgridY(lconf)*NgridZ(lconf)))
+        esp_grid(:,1:itmp)=tgrid(:,:)
+        allocate(gridval(Nconf,3,NgridX(lconf)*NgridY(lconf)*NgridZ(lconf)))
+        gridval(:,:,1:itmp)=tvgrid(:,:,:)
+      endif
+      if(NgridX(lconf)>size(sliceXY,dim=2) .or. NgridY(lconf)>size(sliceXY,dim=3) &
+            .or. NgridZ(lconf)>size(sliceXZ,dim=3)) then !resize sliceXZ etc.
+        if(allocated(sliceXY2)) deallocate(sliceXY2,sliceXZ2,sliceYZ2)
+        if(allocated(usedXY2)) deallocate(usedXY2,usedXZ2,usedYZ2)
+        tNX=size(sliceXY,dim=2)
+        tNY=size(sliceXY,dim=3)
+        tNZ=size(sliceXZ,dim=3)
+        allocate(sliceXY2(size(sliceXY,dim=1),tNX,tNY))
+        allocate(sliceXZ2(size(sliceXZ,dim=1),tNX,tNZ))
+        allocate(sliceYZ2(size(sliceYZ,dim=1),tNY,tNZ))
+        allocate(usedXY2(size(usedXY,dim=1),tNX,tNY))
+        allocate(usedXZ2(size(usedXZ,dim=1),tNX,tNZ))
+        allocate(usedYZ2(size(usedYZ,dim=1),tNY,tNZ))
+        sliceXY2=sliceXY
+        sliceXZ2=sliceXZ
+        sliceYZ2=sliceYZ
+        usedXY2=usedXY
+        usedXZ2=usedXZ
+        usedYZ2=usedYZ
+        deallocate(sliceXY,sliceXZ,sliceYZ)
+        deallocate(usedXY,usedXZ,usedYZ)
+        allocate(sliceXY(Nconf,max(tNX,NgridX(lconf)),max(tNY,NgridY(lconf))))
+        allocate(sliceXZ(Nconf,max(tNX,NgridX(lconf)),max(tNZ,NgridZ(lconf))))
+        allocate(sliceYZ(Nconf,max(tNY,NgridY(lconf)),max(tNZ,NgridZ(lconf))))
+        allocate(usedXY(Nconf,max(tNX,NgridX(lconf)),max(tNY,NgridY(lconf))))
+        allocate(usedXZ(Nconf,max(tNX,NgridX(lconf)),max(tNZ,NgridZ(lconf))))
+        allocate(usedYZ(Nconf,max(tNY,NgridY(lconf)),max(tNZ,NgridZ(lconf))))
+        do i=1,lconf-1
+          sliceXY(i,1:tNX,1:tNY)=sliceXY2(i,:,:)
+          sliceXZ(i,1:tNX,1:tNZ)=sliceXZ2(i,:,:)
+          sliceYZ(i,1:tNY,1:tNZ)=sliceYZ2(i,:,:)
+          usedXY(i,1:tNX,1:tNY)=usedXY2(i,:,:)
+          usedXZ(i,1:tNX,1:tNZ)=usedXZ2(i,:,:)
+          usedYZ(i,1:tNY,1:tNZ)=usedYZ2(i,:,:)
+        end do
+      end if
+    endif
     
     
     ! find the "interesting" grid points
@@ -3462,54 +3840,55 @@ subroutine read_cube_file(filepath,density_filepath)
         ! performance critical for cost function evaluation)
         idx = 0
         lcount = 0
-        do i = 1,NgridX
-            do j = 1,NgridY
-                do k = 1,NgridZ
+        do i = 1,NgridX(lconf)
+            do j = 1,NgridY(lconf)
+                do k = 1,NgridZ(lconf)
                     lcount = lcount + 1
-                    x = origin + (i-1)*axisX + (j-1)*axisY + (k-1)*axisZ
+                    x = origin(lconf,:) + (i-1)*axisX(lconf,:) + (j-1)*axisY(lconf,:) + &
+                        (k-1)*axisZ(lconf,:)
                     if(in_interaction_belt(x,vdw_grid_min_cutoff, &
-                       vdw_grid_max_cutoff)) then !value gets added
+                       vdw_grid_max_cutoff,lconf)) then !value gets added
                         idx = idx + 1
-                        read(30,'(ES13.5)',advance='no',iostat = ios) esp_grid(idx)
+                        read(30,'(ES13.5)',advance='no',iostat = ios) esp_grid(lconf,idx)
                         if(ios /= 0) call throw_error('Could not read ESP grid.')
-                        gridval(:,idx) = x
+                        gridval(lconf,:,idx) = x
                     else
                         read(30,'(ES13.5)',advance='no',iostat = ios) rtmp
                         if(ios /= 0) call throw_error('Could not read ESP grid.')
                     end if
                     
                     !to accomodate weird format, we sometimes have to skip lines
-                    if(mod(lcount,6) == 0 .or. mod(lcount,NgridZ) == 0) then
+                    if(mod(lcount,6) == 0 .or. mod(lcount,NgridZ(lconf)) == 0) then
                         read(30,*) ! line break
-                        if(mod(lcount,NgridZ) == 0) lcount = 0
+                        if(mod(lcount,NgridZ(lconf)) == 0) lcount = 0
                     end if
                     
                     ! everything below is for later visualization with R (very useful to assess quality)
-                    if( i == NgridX/2 ) then  
+                    if( i == NgridX(lconf)/2 ) then  
                         if(.not.in_interaction_belt(x,vdw_grid_min_cutoff, &
-                           vdw_grid_max_cutoff)) then !value is NOT used for fitting
-                            usedYZ(j,k)  = .false.
-                            sliceYZ(j,k) = rtmp
+                           vdw_grid_max_cutoff,lconf)) then !value is NOT used for fitting
+                            usedYZ(lconf,j,k)  = .false.
+                            sliceYZ(lconf,j,k) = rtmp
                         else
-                            sliceYZ(j,k) = esp_grid(idx)
+                            sliceYZ(lconf,j,k) = esp_grid(lconf,idx)
                         end if
                     end if
-                    if( j == NgridY/2 ) then
+                    if( j == NgridY(lconf)/2 ) then
                         if(.not.in_interaction_belt(x,vdw_grid_min_cutoff, &
-                           vdw_grid_max_cutoff)) then !value is NOT used for fitting
-                            usedXZ(i,k)  = .false.
-                            sliceXZ(i,k) = rtmp
+                           vdw_grid_max_cutoff,lconf)) then !value is NOT used for fitting
+                            usedXZ(lconf,i,k)  = .false.
+                            sliceXZ(lconf,i,k) = rtmp
                         else
-                            sliceXZ(i,k) = esp_grid(idx)
+                            sliceXZ(lconf,i,k) = esp_grid(lconf,idx)
                         end if
                     end if
-                    if( k == NgridZ/2 ) then
+                    if( k == NgridZ(lconf)/2 ) then
                         if(.not.in_interaction_belt(x,vdw_grid_min_cutoff, &
-                           vdw_grid_max_cutoff)) then !value is NOT used for fitting
-                            usedXY(i,j)  = .false.
-                            sliceXY(i,j) = rtmp
+                           vdw_grid_max_cutoff,lconf)) then !value is NOT used for fitting
+                            usedXY(lconf,i,j)  = .false.
+                            sliceXY(lconf,i,j) = rtmp
                         else
-                            sliceXY(i,j) = esp_grid(idx)
+                            sliceXY(lconf,i,j) = esp_grid(lconf,idx)
                         end if
                     end if
                 end do
@@ -3518,51 +3897,52 @@ subroutine read_cube_file(filepath,density_filepath)
     else if(use_density_grid_cutoff) then ! based on density cube file        
         idx = 0
         lcount = 0
-        do i = 1,NgridX
-            do j = 1,NgridY
-                do k = 1,NgridZ
+        do i = 1,NgridX(lconf)
+            do j = 1,NgridY(lconf)
+                do k = 1,NgridZ(lconf)
                     lcount = lcount + 1
                     read(31,'(ES13.5)',advance='no',iostat = ios) rtmp
                     if(ios /= 0) call throw_error('Density cube file has wrong format.')
                     if((rtmp < density_grid_max_cutoff) .and. (rtmp > density_grid_min_cutoff)) then !add point
-                        x = origin + (i-1)*axisX + (j-1)*axisY + (k-1)*axisZ
+                        x = origin(lconf,:) + (i-1)*axisX(lconf,:) + (j-1)*axisY(lconf,:) + &
+                            (k-1)*axisZ(lconf,:)
                         idx = idx + 1
-                        read(30,'(ES13.5)',advance='no',iostat = ios) esp_grid(idx)
+                        read(30,'(ES13.5)',advance='no',iostat = ios) esp_grid(lconf,idx)
                         if(ios /= 0) call throw_error('Could not read ESP grid.')
-                        gridval(:,idx) = x
+                        gridval(lconf,:,idx) = x
                     else !skip point
                         read(30,'(ES13.5)',advance='no',iostat = ios) rtmp2
                         if(ios /= 0) call throw_error('Could not read ESP grid.')
                     end if
                     !to accomodate weird format, we sometimes have to skip lines
-                    if(mod(lcount,6) == 0 .or. mod(lcount,NgridZ) == 0) then
+                    if(mod(lcount,6) == 0 .or. mod(lcount,NgridZ(lconf)) == 0) then
                         read(30,*) ! line break
                         read(31,*)
-                        if(mod(lcount,NgridZ) == 0) lcount = 0
+                        if(mod(lcount,NgridZ(lconf)) == 0) lcount = 0
                     end if
                     
-                    if( i == NgridX/2 ) then  
+                    if( i == NgridX(lconf)/2 ) then  
                         if(.not.((rtmp < density_grid_max_cutoff) .and. (rtmp > density_grid_min_cutoff))) then !value is NOT used for fitting
-                            usedYZ(j,k)  = .false.
-                            sliceYZ(j,k) = rtmp2
+                            usedYZ(lconf,j,k)  = .false.
+                            sliceYZ(lconf,j,k) = rtmp2
                         else
-                            sliceYZ(j,k) = esp_grid(idx)
+                            sliceYZ(lconf,j,k) = esp_grid(lconf,idx)
                         end if
                     end if
-                    if( j == NgridY/2 ) then
+                    if( j == NgridY(lconf)/2 ) then
                         if(.not.((rtmp < density_grid_max_cutoff) .and. (rtmp > density_grid_min_cutoff))) then !value is NOT used for fitting
-                            usedXZ(i,k)  = .false.
-                            sliceXZ(i,k) = rtmp2
+                            usedXZ(lconf,i,k)  = .false.
+                            sliceXZ(lconf,i,k) = rtmp2
                         else
-                            sliceXZ(i,k) = esp_grid(idx)
+                            sliceXZ(lconf,i,k) = esp_grid(lconf,idx)
                         end if
                     end if
-                    if( k == NgridZ/2 ) then
+                    if( k == NgridZ(lconf)/2 ) then
                         if(.not.((rtmp < density_grid_max_cutoff) .and. (rtmp > density_grid_min_cutoff))) then !value is NOT used for fitting
-                            usedXY(i,j)  = .false.
-                            sliceXY(i,j) = rtmp2
+                            usedXY(lconf,i,j)  = .false.
+                            sliceXY(lconf,i,j) = rtmp2
                         else
-                            sliceXY(i,j) = esp_grid(idx)
+                            sliceXY(lconf,i,j) = esp_grid(lconf,idx)
                         end if
                     end if
                     
@@ -3572,17 +3952,18 @@ subroutine read_cube_file(filepath,density_filepath)
         close(31)
     end if
     !store number of interesting grid points
-    Ngrid = idx  
-    Ngridr = real(Ngrid,rp) 
+    Ngrid(lconf) = idx  
+    Ngridr(lconf) = real(Ngrid(lconf),rp) 
+    NgridrTot = NgridrTot + Ngridr(lconf)
     
-    if(verbose) write(*,'(6ES13.5)') esp_grid(1:6)
+    if(verbose) write(*,'(6ES13.5)') esp_grid(lconf,1:6)
     if(verbose) write(*,'(6(A8,5X))') ".",".",".",".",".","."
     if(verbose) write(*,'(6(A8,5X))') ".",".",".",".",".","."
     if(verbose) write(*,'(6(A8,5X))') ".",".",".",".",".","."
-    if(verbose) write(*,'(6ES13.5)') esp_grid(Ngrid-5:Ngrid)
+    if(verbose) write(*,'(6ES13.5)') esp_grid(lconf,Ngrid(lconf)-5:Ngrid(lconf))
     if(verbose) write(*,*)
-    if(verbose) write(*,'(I0,A,I0,A,F5.1,A)') Ngrid, ' out of ', NgridX*NgridY*NgridZ, &
-            ' gridpoints are considered (',100*Ngrid/real(NgridX*NgridY*NgridZ,rp),'%).'
+    if(verbose) write(*,'(I0,A,I0,A,F5.1,A)') Ngrid(lconf), ' out of ', NgridX(lconf)*NgridY(lconf)*NgridZ(lconf), &
+            ' gridpoints are considered (',100*Ngrid(lconf)/real(NgridX(lconf)*NgridY(lconf)*NgridZ(lconf),rp),'%).'
     
     close(30)
     
@@ -3593,6 +3974,45 @@ subroutine read_cube_file(filepath,density_filepath)
     return
 end subroutine read_cube_file
 !-------------------------------------------------------------------------------
+
+
+
+!-------------------------------------------------------------------------------
+! Subroutine to remove points from ESP grid that are outside the interaction belt
+! of any atoms included in a list (based on vdw radii)
+subroutine trim_ESP_grid(l)
+    implicit none
+    integer, intent(in)  :: l ! conformer index
+    integer :: i,j,k,tNgrid
+    real(rp), dimension(3,Ngrid(l)) :: tgridval
+    real(rp), dimension(Ngrid(l)) :: tesp_grid
+    
+    if(verbose) write(*,'(A,I0,A,I0)') ' Trimming grid ',l,' - Points before: ',Ngrid(l)
+    i=0
+    tNgrid=0
+    do
+      i=i+1
+      if(i.gt.Ngrid(l)) exit
+      if(in_interaction_belt(gridval(l,:,i),vdw_grid_min_cutoff, &
+                           vdw_grid_max_cutoff,l)) then !value is NOT used for fitting
+        tNgrid=tNgrid+1
+        tgridval(:,tNgrid)=gridval(l,:,i)
+        tesp_grid(tNgrid)=esp_grid(l,i)
+      endif
+    enddo
+
+    Ngrid(l)=tNgrid
+    gridval(l,:,1:tNgrid)=tgridval(:,1:tNgrid)
+    esp_grid(l,1:tNgrid)=tesp_grid(1:tNgrid)
+
+    if(verbose) write(*,'(A,I0)') ' Points after trim = ',Ngrid(l)
+
+end subroutine trim_ESP_grid
+
+!-------------------------------------------------------------------------------
+
+
+
 
 !-------------------------------------------------------------------------------
 ! multipole-charge interaction (aka ESP) given in the appendix of
@@ -3748,13 +4168,14 @@ end subroutine throw_error
 ! read the command line arguments
 subroutine read_command_line_arguments()
     implicit none
-    integer :: i, l, cmd_count, ios
+    integer :: i, l, cmd_count, ios, Ndens
     character(len=1024) :: arg, bla
     
     !read argument count
     cmd_count = command_argument_count()
 
     natmfit = 0 ! initialize number of atoms to fit
+    Ndens = 0   ! initialize number of density cube files provided
     
     if(cmd_count == 0) then
         write(*,'(A)') "You have not provided any command line arguments"
@@ -3775,17 +4196,18 @@ subroutine read_command_line_arguments()
         write(*,'(A)',advance='no') "./"
         !$ write(*,'(A)',advance='no') "p"
         write(*,'(A)') "cubefit.x -generate [-multipole] [-ofatoms] -esp <filepath> -dens <filepath>"//&
-                       " -xyz <filepath> [-prefix <string>] [-refcube <filepath>] [-v]"
+                       " -xyz <filepath> [-prefix <string>] [-frames <filepath>] [-v]"
         write(*,*)
         write(*,'(A)') "-multipole           if present, expects multipole input, else expects charge input" 
         write(*,'(A)') "-ofatoms             if present, visualizes charge fits to individual atomic multipoles instead"
         write(*,'(A)') "-esp     <string>    filepath of the cube file containing the desired output format" 
         write(*,'(A)') "-dens    <string>    filepath of the cube file containing the density data" 
+        write(*,'(A)') "-frames  <string>    filepath of local axis frame file if two conformers have been"
+        write(*,'(A)') "                     specified (two -eps and -dens arguments). Conformer 1 is the"
+        write(*,'(A)') "                     reference used to fit, conformer 2 is the new conformer to"
+        write(*,'(A)') "                     generate a cube file for"
         write(*,'(A)') "-xyz     <string>    filepath of the file containing the charges/multipoles from which to generate cubefile"  
         write(*,'(A)') "-prefix  <string>    identifier prefix for output files"
-        write(*,'(A)') "-refcube <cube> <frame>  if the requested ESP grid represents a different conformer to that used"
-        write(*,'(A)') "                     for fitting, specify a cube file with the original conformer and a local"
-        write(*,'(A)') "                     frame definition file as well"
         write(*,'(A)') "-v                   verbose output" 
         write(*,*)
         write(*,'(A)') "When running in multipole fitting mode"
@@ -3808,11 +4230,15 @@ subroutine read_command_line_arguments()
         !$ write(*,'(A)',advance='no') "p"
         write(*,'(A)') "cubefit.x -esp <filepath> -dens <filepath> [-qtot <real>] [-ncmin <int>]"//&
                                 " [-ncmax <int>] [-ntry <int>] [-prefix <string>] [-greedy <filepath>]"//&
-                                " [-onlymultipoles] [-xyz <filepath>] [-sym] [-v]"
+                                " [-onlymultipoles] [-xyz <filepath>] [-frames <filepath>] [-sym]"//&
+                                " [-atom <int>,...,<int>] [-freeze <int>,...,<int>] [-v]"
         write(*,*)
         write(*,'(A)') "-atom    <int<,int>> index of atom(s) to fit"
-        write(*,'(A)') "-esp     <string>    filepath of the cube file containing the ESP data" 
+        write(*,'(A)') "-esp     <string>    filepath of the cube file containing the ESP data"
+        write(*,'(A)') "                     (multiple conformers can be defined as -esp <file1> -esp <file2>)"  
         write(*,'(A)') "-dens    <string>    filepath of the cube file containing the density data" 
+        write(*,'(A)') "                     (multiple conformers can be defined as -dens <file1> -dens <file2>)"
+        write(*,'(A)') "-frames  <string>    filepath to the file defining axis frames (for multiple conformer fits only)"
         write(*,'(A)') "-qtot    <real>      total charge (default = 0)"
         write(*,'(A)') "-ncmin   <int>       minimum number of charges to fit (default = 2)" 
         write(*,'(A)') "-ncmax   <int>       maximum number of charges to fit (default = 2)" 
@@ -3828,6 +4254,7 @@ subroutine read_command_line_arguments()
           " simplex algorithm rather than D.E. (useful for final refinement with too",&
           " many charges for D.E.)"
         write(*,'(A)') "-sym                 turn on symmetry constrained mode (default is off)"      
+        write(*,'(A)') "-freeze  <int<,int>> indices of atoms to freeze during model refinement"
         write(*,'(A)') "-gpu                 run with CUDA support"
         write(*,'(A)') "-v                   verbose output" 
         write(*,*)
@@ -3879,6 +4306,35 @@ subroutine read_command_line_arguments()
             if(ios /= 0) call throw_error('Could not read command line argument "-atom"')
         end if
 
+        ! read list of atoms to freeze during model refinement
+        if(arg(1:l) == '-freeze') then
+            call get_command_argument(i+1, arg, l)
+            natmfreeze=1
+            k=1
+            bla=''
+            do j = 1,len_trim(arg)
+              if(arg(j:j) .eq. ',') then
+                natmfreeze=natmfreeze+1
+                cycle
+              endif
+            enddo
+            allocate(freezeatoms(natmfreeze))
+            natmfreeze=1
+            do j = 1,len_trim(arg)
+              if(arg(j:j) == ',') then
+                read(bla,*) freezeatoms(natmfreeze)
+                bla=''
+                natmfreeze=natmfreeze+1
+                k=1
+                cycle
+              endif
+              bla(k:k)=arg(j:j)
+              k=k+1
+            enddo
+            read(bla,*) freezeatoms(natmfreeze)
+            if(ios /= 0) call throw_error('Could not read command line argument "-freeze"')
+        end if
+
         ! read analysis flag
         if(arg(1:l) == '-analysis') analysis_mode = .true. 
         
@@ -3910,8 +4366,9 @@ subroutine read_command_line_arguments()
         
         ! input esp cube file
         if(arg(1:l) == '-esp') then
+            Nconf = Nconf + 1
             call get_command_argument(i+1, arg, l)
-            read(arg,'(A)',iostat = ios) input_esp_cubefile
+            read(arg,'(A)',iostat = ios) input_esp_cubefile(Nconf)
             if(ios /= 0) call throw_error('Could not read command line argument "-esp"')
         end if
         
@@ -3936,8 +4393,9 @@ subroutine read_command_line_arguments()
  
         ! input dens cube file
         if(arg(1:l) == '-dens') then
+            Ndens = Ndens + 1
             call get_command_argument(i+1, arg, l)
-            read(arg,'(A)',iostat = ios) input_density_cubefile
+            read(arg,'(A)',iostat = ios) input_density_cubefile(Ndens)
             if(ios /= 0) call throw_error('Could not read command line argument "-dens"')
         end if
         
@@ -3991,13 +4449,9 @@ subroutine read_command_line_arguments()
             if(ios /= 0) call throw_error('Could not read command line argument "-greedy"')
         end if
 
-        ! reference conformer files if we examine performance for a new conformer
-        if(arg(1:l) == '-refcube') then
-            use_ref_geom = .true.
+        ! read a local frame definition file if we fit to multiple conformers
+        if(arg(1:l) == '-frames') then
             call get_command_argument(i+1, arg, l)
-            read(arg,'(A)',iostat = ios) ref_cubefile
-            if(ios /= 0) call throw_error('Could not read command line argument "-refcube"')
-            call get_command_argument(i+2, arg, l)
             read(arg,'(A)',iostat = ios) local_framefile
         end if
         
@@ -4014,10 +4468,6 @@ subroutine read_command_line_arguments()
         call throw_error('Only one flag allowed: either "-analysis" or "-generate"')
     end if
 
-    if(use_ref_geom.and.(.not.generate_mode.or.fit_multipoles)) then
-        call throw_error('new conformers are only allowed in generate mode and for charge fits (-generate)')
-    end if
-
     if(use_symmetry.and.fit_multipoles) then
         call throw_error('Only one flag allowed: either "-multipole" or "-sym"')
     end if
@@ -4026,30 +4476,45 @@ subroutine read_command_line_arguments()
     if(analysis_mode) then !analysis mode
         vdw_grid_min_cutoff = 0.0_rp
         vdw_grid_max_cutoff = vbig
-        if((trim(input_esp_cubefile) == '').or.(trim(compare_esp_cubefile) == '') &
-           .or.(trim(input_density_cubefile) == '')) then
+        if((trim(input_esp_cubefile(1)) == '').or.(trim(compare_esp_cubefile) == '') &
+           .or.(trim(input_density_cubefile(1)) == '')) then
             call throw_error('Missing required arguments "-esp" and/or "-esp2" and/or "-dens"')
         end if
         if(verbose) write(*,'(A)') "Running in analysis mode"
     else if (generate_mode) then !generate mode
-        if((trim(input_esp_cubefile) == '').or.(trim(input_xyzfile) == '') &
-           .or.(trim(input_density_cubefile) == '')) then
+        if((trim(input_esp_cubefile(1)) == '').or.(trim(input_xyzfile) == '') &
+           .or.(trim(input_density_cubefile(1)) == '')) then
             call throw_error('Missing required arguments "-esp" and/or "-xyz" and/or "-dens"')
         end if
+        if(Nconf > 2) then
+            call throw_error('No more than 2 conformers (one reference, one to generate) allowed in generate mode')
+        end if 
         if(verbose) write(*,'(A)') "Running in generate mode"
     else !normal mode
-        if((trim(input_esp_cubefile) == '').or.(trim(input_density_cubefile) == '')) then
+        if((trim(input_esp_cubefile(1)) == '').or.(trim(input_density_cubefile(1)) == '')) then
             call throw_error('Missing required arguments "-esp" and/or "-dens"')
         end if
         if(trim(input_xyzfile) /= '') refine_solution = .true.
         if(use_greedy_fit .and. refine_solution) then
             call throw_error('Refining a solution is incompatible with greedy mode!')
         end if
+        if(natmfreeze .gt. 0 .and. .not. refine_solution) then
+            call throw_error('freezing atoms in fit is only supported for model refinement')
+        end if
         if(simplex_only .and. .not. refine_solution) then
             call throw_error('simplex algorithm should be used for refinement only!')
         end if
         if(verbose) write(*,'(A)') "Running in fitting mode"
     end if
+    if (Nconf.gt.1 .and. local_framefile .eq. '') then
+        call throw_error('A local frames file must be provided to fit to multiple conformers')
+    end if
+    if (fit_multipoles .and. Nconf.gt.1) then
+        call throw_error('Multiple conformers not supported for multipole fitting')
+    end if
+    if(Nconf /= Ndens) then
+        call throw_error('Number of ESP grids supplied does not match density grids')
+    end if 
     
     if(verbose) write(*,*)
    
