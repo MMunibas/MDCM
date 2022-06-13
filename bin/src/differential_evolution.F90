@@ -544,6 +544,7 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
         if(verbose.and.modulo(gen,Nprint) == 0) then
             write(*,'(A4,I6,A1,I0,5X,A9,ES14.7,A,L)') "gen ", gen, "/", maxGens,&
                      " elitist ", fpop(bestindx), " feasible? ", fsblepop(bestindx)
+            flush(6)
         end if
         
         ! decrease diversity parameter => focus search more on feasible region

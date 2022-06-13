@@ -103,10 +103,10 @@ real(rp) :: total_charge2     = 0._rp   ! total charge
 real(rp) :: max_charge        = 1._rp  ! maximum allowed absolute value of a charge (in search range)
 real(rp) :: max_extend        = 5._rp   ! gets calculated automatically from vdW radii
 
-character(len=1024) :: input_esp_cubefile(MAXCONF), input_density_cubefile(MAXCONF)
+character(len=1024) :: input_esp_cubefile(MAXCONF), input_density_cubefile(MAXCONF), &
+                       input_multipolefile(MAXCONF)
 
 character(len=1024) :: compare_esp_cubefile = '', &
-                       input_multipolefile = '', &
                        input_xyzfile = '', &
                        prefix = '', &
                        dummystring = '', dummystring2 = '', dummystring3 = '', & ! input files
@@ -142,7 +142,7 @@ real,save, dimension(:,:), allocatable :: gridval_sp                   ! stores 
 integer,save, dimension(:),   allocatable :: atom_num                  ! stores the atomic numbers of the atoms
 real(rp),save, dimension(:,:,:), allocatable :: atom_pos               ! stores the atomic positions 
 real(rp), dimension(3)                :: atom_com                      ! stores the atomic center of mass (for checking charge symmetry)
-real(rp), dimension(:), allocatable :: multipole                       ! stores multipole parameters
+real(rp), dimension(:,:), allocatable :: multipole,multipole_best      ! stores multipole parameters for each conformer and best fit so far
 
 real(rp), dimension(:,:,:), allocatable :: multipole_solutions         ! stores charge positions for the multipole fits (num_charges_max_multipole*4,num_charges_max_multipole,Natom)
 real(rp), dimension(:), allocatable :: mapsol                          ! temporary charge array
@@ -150,7 +150,7 @@ real(rp), dimension(:,:,:), allocatable, save :: sym_multipole_solutions     ! s
 real(rp), dimension(:,:), allocatable   :: multipole_solutions_rmse    ! stores RMSE of the multipole solutions (needed for greedy mode)
 integer, dimension(:,:), allocatable    :: num_sym_solution_ops                        ! stores number of symmetry ops for best fit to each number of atomic charges
 integer, dimension(:,:,:), allocatable  :: sym_solution_ops                          ! stores symmetry ops for best fit to each number of atomic charges
-real(rp), dimension(:), allocatable :: multipole_best, multipole_save  ! current best charge fit in the multipole fit
+real(rp), dimension(:), allocatable :: multipole_save  ! current best charge fit in the multipole fit
 !real(rp), dimension(:,:,:), allocatable, save :: symmetry_ops          ! stores the symmetry operations in matrix form
 
 ! these are only used for visualizing the grid with R in the end
@@ -178,7 +178,7 @@ real(rp), dimension(:,:), allocatable :: search_range ! has a minimum and a maxi
 ! for axis frames and multiple conformers
 integer, save, dimension(:,:), allocatable :: frames
 integer, dimension(:), allocatable :: ref_atms ! to store nearest atom to each charge
-integer :: Nconf ! number of conformers loaded
+integer :: Nconf,tNconf,Nmtp ! number of conformers and mtp files loaded
 integer :: Nframes ! number of local axis frames
 real(rp), dimension(:,:,:), allocatable :: ex1,ey1,ez1,ex2,ey2,ez2,ex3,ey3,ez3 ! local axes
 character(len=2), dimension(:), allocatable :: frametypes ! can be bond or bisector-type local axis frame
@@ -193,6 +193,7 @@ real(rp) :: tmp, RMSE_best, RMSE_tmp, MAE_tmp, maxAE_tmp, lrmse_best
 
 ! Initialize variables
 Nconf = 0
+Nmtp = 0
 NgridrTot = 0
 
 call system("mkdir -p slices")
@@ -267,15 +268,18 @@ end if
 if(generate_mode) then
     if(fit_multipoles) then
         !allocate memory
-        if(.not.allocated(multipole))      allocate(multipole((lmax+1)**2*Natom))
-        if(.not.allocated(multipole_best)) allocate(multipole_best((lmax+1)**2*Natom))
-        call read_multipole_file(input_xyzfile)
+        if(.not.allocated(multipole))      allocate(multipole(Nconf,(lmax+1)**2*Natom))
+        if(.not.allocated(multipole_best)) allocate(multipole_best(Nconf,(lmax+1)**2*Natom))
+        if(input_multipolefile(1) == '')then
+          call throw_error('No multipole file supplied via -mtpfile to generate cube')
+        endif
+        call read_multipole_file(input_multipolefile(1),1)
         
         if(generate_atomic) then
             do a = 1,Natom
                 do num_charges = 1,num_charges_max_multipole
                     !calculate esp grid and slice data for the multipole of atom a
-                    call calc_multipole_grid_and_slice_data(multipole,a) 
+                    call calc_multipole_grid_and_slice_data(multipole,a,1) 
                     !read the charges
                     write(dummystring, '(I0)') a
                     write(dummystring2,'(I0)') num_charges
@@ -306,9 +310,9 @@ if(generate_mode) then
                 case(5)
                     write(dummystring,'(A)') "ditriantapole"
             end select       
-            call write_cube_file_multipole(multipole)
+            call write_cube_file_multipole(multipole,1)
             ! plot with R
-            call write_image_slice_data_multipole(multipole) !for visualization with R
+            call write_image_slice_data_multipole(multipole,1) !for visualization with R
 !            call execute_command_line("./visualize.r",wait=.true.)
             if(trim(prefix) /= '') then
                 dummystring = trim(prefix)//"/"//trim(dummystring)//"_expansion_comparison.png"
@@ -319,6 +323,9 @@ if(generate_mode) then
             if(verbose) write(*,'(A)') "Written cubefile and slice data"  
         end if
     else
+        if(input_xyzfile == '')then
+          call throw_error('No charge file supplied via -xyz to generate cube')
+        endif
         call read_xyz_file()
         if(Nconf>1)then ! we want to test a conformer than we haven't fitted for
           allocate(lcharges(size(charges,dim=1)))
@@ -379,16 +386,16 @@ if(fit_multipoles) then
     write(*,'(A)') "WARNING: THIS ROUTINE IS NOT EFFICIENT!"
     write(*,'(A)') "USE FOR TESTING PURPOSES ONLY!!"
     !allocate memory
-    if(.not.allocated(multipole))      allocate(multipole((lmax+1)**2*Natom))
-    if(.not.allocated(multipole_best)) allocate(multipole_best((lmax+1)**2*Natom))
+    if(.not.allocated(multipole))      allocate(multipole(Nconf,(lmax+1)**2*Natom))
+    if(.not.allocated(multipole_best)) allocate(multipole_best(Nconf,(lmax+1)**2*Natom))
     if(.not.allocated(multipole_save)) allocate(multipole_save((lmax+1)**2*Natom))
-    if(.not.allocated(search_range))   allocate(search_range(2,size(multipole,dim=1)))
+    if(.not.allocated(search_range))   allocate(search_range(2,size(multipole,dim=2)))
     multipole = 0._rp
     multipole_best = 0._rp
     lcheck = 0
     
     !initialize search_range
-    do i = 1,size(multipole,dim=1)
+    do i = 1,size(multipole,dim=2)
         search_range(:,i) = (/-0.1_rp, 0.1_rp/)
     end do
     !initialize differential evolution
@@ -430,7 +437,7 @@ if(fit_multipoles) then
             read(30,*)
             i = 1
             do while(.true.)
-                read(30,*,iostat=ios) dummystring2, dummystring3, multipole_best(i)
+                read(30,*,iostat=ios) dummystring2, dummystring3, multipole_best(1,i)
                 if(ios /= 0) then
                     exit
                 else
@@ -446,17 +453,17 @@ if(fit_multipoles) then
     
         do try = 1,num_trials
             if(verbose) write(*,'(A,I0)') "Fitting "//trim(dummystring)//" expansion, try ", try
-            call DE_optimize(rmse_multipole,feasible_multipole,sum_constr_multipole,multipole,&
-                             guess=multipole_best) 
-            RMSE_tmp = rmse_multipole(multipole)
+            call DE_optimize(rmse_multipole,feasible_multipole,sum_constr_multipole,&
+                             multipole(1,:),guess=multipole_best(1,:)) 
+            RMSE_tmp = rmse_multipole(multipole(1,:))
             if(verbose) write(*,'(A,ES23.9,A)') "RMSE ", RMSE_tmp, " Hartree"
             if(RMSE_tmp < RMSE_best) then
                 if(verbose) write(*,'(A)') "NEW BEST!"   
                 RMSE_best = RMSE_tmp
-                multipole_best = multipole
+                multipole_best(1,:) = multipole(1,:)
                         call write_multipole_file(multipole_best) !write output file
                 ! plot with R
-                call write_image_slice_data_multipole(multipole_best) !for visualization with R
+                call write_image_slice_data_multipole(multipole_best,1) !for visualization with R
 !                call execute_command_line("./visualize.r",wait=.true.)
                 dummystring2 = trim(dummystring)//"_expansion_comparison.png"
                 if(trim(prefix) /= '') dummystring2 = trim(prefix)//"/"//trim(dummystring2)
@@ -532,7 +539,7 @@ if(use_greedy_fit) then
     total_charge2 = total_charge
     
     !allocate memory for the multipole information and read it
-    if(.not.allocated(multipole))                 allocate(multipole((lmax+1)**2*Natom))
+    if(.not.allocated(multipole))                 allocate(multipole(Nconf,(lmax+1)**2*Natom))
     if(.not.allocated(multipole_solutions))       allocate( &
        multipole_solutions(num_charges_max_multipole*4,num_charges_max_multipole,Natom))
     if(.not.allocated(sym_multipole_solutions))       allocate( &
@@ -540,10 +547,22 @@ if(use_greedy_fit) then
     if(.not.allocated(multipole_solutions_rmse))  allocate( &
        multipole_solutions_rmse(0:num_charges_max_multipole,Natom))
     if(.not.allocated(multipole_best))            allocate( &
-       multipole_best(num_charges_max_multipole*4))
+       multipole_best(Nconf,num_charges_max_multipole*4))
 
     !read in multipole data
-    call read_multipole_file(input_multipolefile)
+    if(Nconf .ne. Nmtp) then
+      call throw_error('For atom fitting there must be one'//&
+          ' mtp file for each conformer')
+    end if
+    ! don't run atom fits to multiple conformers...      
+    if(Nconf>1) then
+!      call throw_error('Sorry, atom fitting is not yet implemented for multiple conformers')
+      write(*,*) 'Warning: atom fitting uses only 1 conformer. Subsequent fragment fits will use all available conformers'
+    end if
+    tNconf=Nconf
+    Nconf=1
+
+    call read_multipole_file(input_multipolefile(1),1)
 
     ! allocate memory
     if(.not.allocated(search_range)) allocate(search_range(2,4*num_charges_max_multipole), stat=ios)
@@ -554,10 +573,10 @@ if(use_greedy_fit) then
         a = fitatoms(b)
         fitAtm = a
         !calculate the total charge of this multipole
-        total_charge = multipole(a)
+        total_charge = multipole(1,a)
         
         !calculate esp grid and slice data for the multipole of atom a
-        call calc_multipole_grid_and_slice_data(multipole,a) 
+        call calc_multipole_grid_and_slice_data(multipole,a,1) 
         !copy grid to GPU if using
 #ifdef GPU
         if(gpu) call gpu_set_ESPgrid(gridval(1,:,:), esp_grid(1,:), Ngrid(1))
@@ -637,7 +656,7 @@ if(use_greedy_fit) then
                 close(30)
                 !calculate the RMSE of the loaded solution
                 multipole_solutions_rmse(num_charges,a) = rmse_qtot(multipole_solutions(1:qdim,num_charges,a))
-                !print*, multipole_solutions_rmse(num_charges,a)
+                !print*, 'multipole_solutions_rmse ',a,num_charges,multipole_solutions_rmse(num_charges,a)
                 if(verbose) then
                     write(*,'(A)') 'File "'//trim(dummystring)//'" already exists.'//&
                                                    " Fitting procedure is skipped."
@@ -646,10 +665,6 @@ if(use_greedy_fit) then
                 cycle
             end if        
           
-            ! don't run atom fits to multiple conformers...      
-            if(Nconf>1) then
-              call throw_error('Sorry, atom fitting is not yet implemented for multiple conformers')
-            end if
             ! initialize RMSE    
             multipole_solutions_rmse(num_charges,a) = vbig
 
@@ -707,7 +722,7 @@ if(use_greedy_fit) then
                 if(RMSE_tmp < multipole_solutions_rmse(num_charges,a)) then
                     if(verbose) write(*,'(A)') "NEW BEST!"                       
                     multipole_solutions_rmse(num_charges,a) = RMSE_tmp
-                    multipole_best = multipole_solutions(:,num_charges,a)
+                    multipole_best(1,:) = multipole_solutions(:,num_charges,a)
                     MAE_tmp   = mae_qtot(multipole_solutions(1:qdim,num_charges,a))
                     maxAE_tmp = max_ae_qtot(multipole_solutions(1:qdim,num_charges,a))
                     ! write results to file        
@@ -751,7 +766,7 @@ if(use_greedy_fit) then
             end do
             
             !load the best solution
-            multipole_solutions(:,num_charges,a) = multipole_best
+            multipole_solutions(:,num_charges,a) = multipole_best(1,:)
             
             !calculate the magnitude of the last charge
             multipole_solutions(qdim+1,num_charges,a) = 0._rp
@@ -803,6 +818,9 @@ if(use_greedy_fit) then
     sliceYZ = sliceYZ2
     esp_grid(1,:) = esp_grid2(:)
     total_charge = total_charge2
+
+    !restore all conformers
+    Nconf=tNconf
     
     if(allocated(esp_grid2))    deallocate(esp_grid2)
     if(allocated(sliceXY2))     deallocate(sliceXY2)
@@ -817,13 +835,13 @@ end if
 !than the whole molecule
 
 !allocate memory for the multipole information and read it
-if(.not.allocated(multipole))                 allocate(multipole((lmax+1)**2*Natom))
+if(.not.allocated(multipole))                 allocate(multipole(Nconf,(lmax+1)**2*Natom))
 if(.not.allocated(multipole_solutions))       allocate( &
    multipole_solutions(num_charges_max_multipole*4,num_charges_max_multipole,Natom))
 if(.not.allocated(multipole_solutions_rmse))  allocate( &
    multipole_solutions_rmse(0:num_charges_max_multipole,Natom))
 if(.not.allocated(multipole_best))            allocate( &
-   multipole_best(num_charges_max_multipole*4))
+   multipole_best(Nconf,num_charges_max_multipole*4))
 
 
 
@@ -831,8 +849,9 @@ if(.not.allocated(multipole_best))            allocate( &
 !atoms
 
 if(natmfit < Natom.and..not.use_symmetry) then ! some atoms are excluded
-  if(Nconf>1) then
-    call throw_error('Sorry, fragment fitting is not yet implemented for multiple conformers')
+  if(Nconf .ne. Nmtp) then
+    call throw_error('For multiconformer fragment fitting there must be one mtp file for '//&
+          'each conformer')
   end if
   write(*,'(A)') 'Fragment fit detected'
   write(*,'(A)') 'Fitting to MTP grid, discarding reference MEP cube data'
@@ -840,22 +859,27 @@ if(natmfit < Natom.and..not.use_symmetry) then ! some atoms are excluded
   write(*,'(A)') 'MEP from the reference cube file'
 
   !read in multipole data
-  call read_multipole_file(input_multipolefile)
+  do j = 1,Nconf
+    call read_multipole_file(input_multipolefile(j),j)
+  end do
 
   ! first zero reference grid
-  do i = 1,Ngrid(1)
-     esp_grid(1,i) = 0.d0
-  end do
-  ! now repopulate with multipolar ESP
-  do b=1, natmfit  
-    a=fitatoms(b)
-    call add_atom_multipole_ESP_to_grid(multipole,a)
+  do j = 1,Nconf
+    do i = 1,Ngrid(j)
+     esp_grid(j,i) = 0.d0
+    end do
+    ! now repopulate with multipolar ESP
+    do b=1, natmfit  
+      a=fitatoms(b)
+      call add_atom_multipole_ESP_to_grid(multipole,a,j)
+    enddo
   enddo
   !subtract charge from atomic multipoles of atoms that are not being fitted from total
   !charge of molecule (to allow fitting of fragments)
+  total_charge = 0.d0
   do b=1, natmfit
     a=fitatoms(b)
-    total_charge=total_charge + multipole(a)
+    total_charge=total_charge + multipole(1,a)
   enddo
   if(verbose) write(*,'(A,ES23.9)') "Total fragment charge (a.u.): ",total_charge
 endif
@@ -1965,6 +1989,7 @@ real(rp) function rmse(q)
     real(rp), dimension(size(q,dim=1)) :: q2,q3 ! transformed charges
     integer :: idx,i
     rmse = 0._rp
+
     do idx = 1,Ngrid(1)
       rmse = rmse + (coulomb_potential(gridval(1,:,idx),q) - esp_grid(1,idx))**2
     end do
@@ -1978,6 +2003,7 @@ real(rp) function rmse(q)
         rmse = rmse + (coulomb_potential(gridval(i,:,idx),q3) - esp_grid(i,idx))**2
       end do
     end do
+
     rmse = sqrt(rmse/NgridrTot)
 end function rmse
 !-------------------------------------------------------------------------------
@@ -2009,7 +2035,7 @@ real(rp) function rmse_multipole(m)
     integer :: idx
     rmse_multipole = 0._rp
     do idx = 1,Ngrid(1)
-        rmse_multipole = rmse_multipole + (coulomb_potential_multipole(gridval(1,:,idx),m) - esp_grid(1,idx))**2
+        rmse_multipole = rmse_multipole + (coulomb_potential_multipole(gridval(1,:,idx),m,1) - esp_grid(1,idx))**2
     end do
     rmse_multipole = sqrt(rmse_multipole/Ngridr(1))
 end function rmse_multipole
@@ -2260,17 +2286,17 @@ end function coulomb_potential_sp
 
 !-------------------------------------------------------------------------------
 ! computes Coulomb potential for the given mutipole expansion at position x, 
-real(rp) function coulomb_potential_multipole(x,mp)
+real(rp) function coulomb_potential_multipole(x,mp,conf)
     implicit none
     real(rp), dimension(3), intent(in)    :: x ! position
     real(rp), dimension(:) :: mp ! multipoles
     real(rp) :: rmag(Natom), r(3,Natom), qsum
-    integer :: idx, l, m, a, load
+    integer :: conf, idx, l, m, a, load
     
     !precalculate distances and vectors for all atoms, as well as the total charge
     qsum = 0._rp
     do a = 1,Natom
-        r(:,a) = x - atom_pos(1,:,a)
+        r(:,a) = x - atom_pos(conf,:,a)
         rmag(a) = sqrt(sum(r(:,a)**2))
         r(:,a) = r(:,a)/rmag(a)
         if((lcur == 0).and.(a < Natom)) qsum = qsum + mp(a) ! add charge to total charge
@@ -2280,7 +2306,7 @@ real(rp) function coulomb_potential_multipole(x,mp)
         mp(Natom) = total_charge - qsum ! constrains the total charge to 0
     else !load the previously found solution
         load = lcur**2*Natom
-        mp(1:load) = multipole_best(1:load)
+        mp(1:load) = multipole_best(conf,1:load)
     end if
     
 
@@ -2291,7 +2317,8 @@ real(rp) function coulomb_potential_multipole(x,mp)
         do a = 1,Natom
             do m = -l,l
                idx = idx + 1
-                   coulomb_potential_multipole = coulomb_potential_multipole + mp(idx)*mESP(l,m,rmag(a),r(:,a))
+                   coulomb_potential_multipole = coulomb_potential_multipole + & 
+                         mp(idx)*mESP(l,m,rmag(a),r(:,a))
             end do
         end do
     end do    
@@ -2301,17 +2328,17 @@ end function coulomb_potential_multipole
 
 !-------------------------------------------------------------------------------
 ! computes Coulomb potential for a single given atomic mutipole expansion at position x
-real(rp) function coulomb_potential_single_multipole(x,mp,a)
+real(rp) function coulomb_potential_single_multipole(x,mp,a,conf)
     implicit none
-    integer, intent(in) :: a
+    integer, intent(in) :: a,conf
     real(rp), dimension(3), intent(in)    :: x ! position    
-    real(rp), dimension(:) :: mp ! multipoles
+    real(rp), dimension(:,:) :: mp ! multipoles
     
     real(rp)  :: rmag, r(3)
     integer :: idx, l, m, i
     
     !precalculate distance
-    r = x - atom_pos(1,:,a)
+    r = x - atom_pos(conf,:,a)
     rmag = sqrt(sum(r**2))
     r = r/rmag
 
@@ -2323,7 +2350,7 @@ real(rp) function coulomb_potential_single_multipole(x,mp,a)
             do m = -l,l
                 idx = idx + 1
                 if(i /= a) cycle
-                coulomb_potential_single_multipole = coulomb_potential_single_multipole + mp(idx)*mESP(l,m,rmag,r)
+                coulomb_potential_single_multipole = coulomb_potential_single_multipole + mp(conf,idx)*mESP(l,m,rmag,r)
             end do
         end do
     end do    
@@ -2477,9 +2504,10 @@ subroutine init_pop_greedy(pop)
     real(rp), dimension(Natom) :: improvementProbability
     integer, dimension(Natom)  :: chargesPerAtom
     integer  :: popSize, a, p, dimStart, dimEnd
+    integer  :: tNconf
     
     popSize = size(pop,dim=2)    
-    
+
     ! loop over population        
     do p = 1,popSize
         !decide how to distribute the charges
@@ -2488,7 +2516,6 @@ subroutine init_pop_greedy(pop)
         
         do while(sum(chargesPerAtom) < num_charges .and. &
                  sum(chargesPerAtom) < num_charges_max_multipole*natmfit) !we randomly decide where to put charges
-            
             !determine how likely it is that placing a charge will improve the solution    
             do b = 1,natmfit
                 a = fitatoms(b)
@@ -2525,7 +2552,7 @@ subroutine init_pop_greedy(pop)
         do b = 1,natmfit
             a = fitatoms(b)
             if(chargesPerAtom(a) == 0) then
-                charge_correction = charge_correction + multipole(a)
+                charge_correction = charge_correction + multipole(1,a)
             end if
         end do
         charge_correction = charge_correction/real(num_charges,rp)
@@ -2558,6 +2585,7 @@ subroutine init_pop_greedy(pop)
 
         !set vector
         pop(:,p) = pop(:,p) * prototype
+
     end do     
 end subroutine init_pop_greedy
 !-------------------------------------------------------------------------------
@@ -2592,7 +2620,7 @@ subroutine init_pop_multipole(pop)
             ! set charge magnitude
             if(d+3 < qdim) then ! in case we use constraint charges
                 call random_number(ran)
-                pop(d+3,p) = -abs(multipole(a)) + 2*ran*abs(multipole(a))
+                pop(d+3,p) = -abs(multipole(1,a)) + 2*ran*abs(multipole(1,a))
             end if
         end do
     end do     
@@ -2611,7 +2639,7 @@ subroutine sym_init_pop_multipole(pop)
 
     ! loop over population
     do p = 1,popSize
-      call sym_init_pars(pop(:,p),symFitAtms,num_symFitAtms,multipole,vdW_scaling,&
+      call sym_init_pars(pop(:,p),symFitAtms,num_symFitAtms,multipole(1,:),vdW_scaling,&
            vdW_radius,atom_num)
     end do
 end subroutine sym_init_pop_multipole
@@ -2629,7 +2657,7 @@ subroutine sym_init_pop(pop)
 
     ! loop over population
     do p = 1,popSize
-      call sym_init_pars(pop(:,p),symFitAtms,num_symFitAtms,multipole,vdW_scaling,&
+      call sym_init_pars(pop(:,p),symFitAtms,num_symFitAtms,multipole(1,:),vdW_scaling,&
            vdW_radius,atom_num)
     end do
 end subroutine sym_init_pop
@@ -2736,10 +2764,10 @@ end do
 end subroutine sym_permutate_rmse
 
 !-------------------------------------------------------------------------------
-subroutine read_multipole_file(inpfile)
+subroutine read_multipole_file(inpfile,conf)
 implicit none
 character(len=*), intent(in) :: inpfile
-integer :: ios,idx,l,a,m
+integer :: conf,ios,idx,l,a,m
 character(len=1024) :: dummy1,dummy2
 
 open(30, file=trim(inpfile), status="old", action="read", iostat = ios)
@@ -2752,11 +2780,11 @@ do l = 0,lcur
     do a = 1,Natom
         do m = -l,l
             idx = idx + 1
-            read(30,*,iostat=ios) dummy1, dummy2, multipole(idx)
+            read(30,*,iostat=ios) dummy1, dummy2, multipole(conf,idx)
         end do
     end do
 end do
-multipole_best = multipole
+multipole_best = multipole !only needed for single conformer for now...
 close(30)
 
 
@@ -2900,7 +2928,7 @@ end subroutine write_xyz_file
 subroutine write_multipole_file(mp)
     implicit none 
     integer :: ios,l,m,a,idx
-    real(rp), dimension(:) :: mp !multipoles
+    real(rp), dimension(:,:) :: mp !multipoles
     character(len=1024) :: outfile
     
     !decide filename
@@ -2924,14 +2952,14 @@ subroutine write_multipole_file(mp)
     if(ios /= 0) call throw_error('Could not open "'//trim(outfile)//'" for writing')
     
     write(30,'(ES23.9)') total_charge
-    write(30,'(A,ES23.9,A)') "# RMSE: ", rmse_multipole(mp), "      Qa(l,m) [a = atom index]"
+    write(30,'(A,ES23.9,A)') "# RMSE: ", rmse_multipole(mp(1,:)), "      Qa(l,m) [a = atom index]"
     write(30,'(I0)') lcur
     idx = 0
     do l = 0,lcur
         do a = 1,Natom
             do m = -l,l
                 idx = idx + 1
-                write(30,'(A,I0,AI0,A,I0,AF25.16)') "Q",a,"(",l,",",m,")",mp(idx)
+                write(30,'(A,I0,AI0,A,I0,AF25.16)') "Q",a,"(",l,",",m,")",mp(1,idx)
             end do
         end do
     end do
@@ -3193,11 +3221,11 @@ end subroutine write_image_slice_data
 
 !-------------------------------------------------------------------------------
 ! writes files for plotting in R
-subroutine write_image_slice_data_multipole(multipole)
+subroutine write_image_slice_data_multipole(multipole,conf)
     implicit none
-    real(rp), dimension(:) :: multipole
+    real(rp), dimension(:,:) :: multipole
     real(rp), dimension(3) :: x ! position
-    integer :: i,j,ios
+    integer :: conf,i,j,ios
     
     !write XY slices
     open(30, file="slices/sliceXY.csv", status="replace", action="write", iostat = ios)
@@ -3213,14 +3241,14 @@ subroutine write_image_slice_data_multipole(multipole)
             x = origin(1,:) + (i-1)*axisX(1,:) + (j-1)*axisY(1,:) + (NgridZ(1)/2-1)*axisZ(1,:)
             !determine whether to write value or not
             if(usedXY(1,i,j)) then 
-                write(30,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole),','
+                write(30,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole(conf,:),conf),','
                 write(31,'(ES13.5,A)', advance='no') sliceXY(1,i,j),','
             else
                 write(30,'(A)', advance='no') 'NA,'
                 write(31,'(A)', advance='no') 'NA,'
             end if
             !full slices are always written
-            write(32,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole),','
+            write(32,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole(conf,:),conf),','
             write(33,'(ES13.5,A)', advance='no') sliceXY(1,i,j),','
         end do
         write(30,*) !line break
@@ -3247,14 +3275,14 @@ subroutine write_image_slice_data_multipole(multipole)
             x = origin(1,:) + (i-1)*axisX(1,:) + (NgridY(1)/2-1)*axisY(1,:) + (j-1)*axisZ(1,:)
             !determine whether to write value or not
             if(usedXZ(1,i,j)) then 
-                write(30,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole),','
+                write(30,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole(conf,:),conf),','
                 write(31,'(ES13.5,A)', advance='no') sliceXZ(1,i,j),','
             else
                 write(30,'(A)', advance='no') 'NA,'
                 write(31,'(A)', advance='no') 'NA,'
             end if
             !full slices are always written
-            write(32,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole),','
+            write(32,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole(conf,:),conf),','
             write(33,'(ES13.5,A)', advance='no') sliceXZ(1,i,j),','
         end do
         write(30,*) !line break
@@ -3281,14 +3309,14 @@ subroutine write_image_slice_data_multipole(multipole)
             x = origin(1,:) + (NgridX(1)/2-1)*axisX(1,:) + (i-1)*axisY(1,:) + (j-1)*axisZ(1,:)
             !determine whether to write value or not
             if(usedYZ(1,i,j)) then 
-                write(30,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole),','
+                write(30,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole(conf,:),conf),','
                 write(31,'(ES13.5,A)', advance='no') sliceYZ(1,i,j),','
             else
                 write(30,'(A)', advance='no') 'NA,'
                 write(31,'(A)', advance='no') 'NA,'
             end if
             !full slices are always written
-            write(32,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole),','
+            write(32,'(ES13.5,A)', advance='no') coulomb_potential_multipole(x,multipole(conf,:),conf),','
             write(33,'(ES13.5,A)', advance='no') sliceYZ(1,i,j),','
         end do
         write(30,*) !line break
@@ -3412,13 +3440,13 @@ end subroutine write_cube_file
 
 !-------------------------------------------------------------------------------
 ! writes a cube file containing the esp for direct comparison
-subroutine write_cube_file_multipole(multipole)
+subroutine write_cube_file_multipole(multipole,conf)
 implicit none 
 character(len=1024) outfile, dummy
-real(rp), dimension(:) :: multipole
+real(rp), dimension(:,:) :: multipole
 real(rp) :: x(3) ! dummy vector
 real(rp) vtot
-integer :: i,j,k,lcount,ios,a,b
+integer :: conf,i,j,k,lcount,ios,a,b
 
 !decide filename
 select case (lcur)
@@ -3466,10 +3494,10 @@ do i = 1,NgridX(1)
               vtot=0._rp
               do b=1,natmfit
                 a=fitatoms(b)
-                vtot=vtot + coulomb_potential_single_multipole(x,multipole,a)
+                vtot=vtot + coulomb_potential_single_multipole(x,multipole,a,conf)
               end do
             else 
-              vtot=coulomb_potential_multipole(x,multipole)
+              vtot=coulomb_potential_multipole(x,multipole(conf,:),conf)
             end if
             write(30,'(ES13.5)', advance='no') vtot
             !to accomodate weird format, we sometimes have to skip lines
@@ -3486,36 +3514,36 @@ end subroutine write_cube_file_multipole
 !-------------------------------------------------------------------------------
 
 !-------------------------------------------------------------------------------
-subroutine calc_multipole_grid_and_slice_data(mp,a)
+subroutine calc_multipole_grid_and_slice_data(mp,a,conf)
     implicit none
-    integer :: a !input atom
-    real(rp), dimension(:) :: mp !input multipole
+    integer :: conf,a !input atom and conformer
+    real(rp), dimension(:,:) :: mp !input multipole
     integer :: i,j
     
     !calculate the esp grid generated from just this multipole
     do i = 1,Ngrid(1)
-        esp_grid(1,i) = coulomb_potential_single_multipole(gridval(1,:,i),mp,a) 
+        esp_grid(1,i) = coulomb_potential_single_multipole(gridval(1,:,i),mp,a,conf) 
     end do
     
     !calculate the slice data from just this multipole
     do i = 1,NgridX(1)
         do j = 1,NgridY(1)
                 sliceXY(1,i,j) = coulomb_potential_single_multipole(origin(1,:) + &
-                   (i-1)*axisX(1,:) + (j-1)*axisY(1,:) + (NgridZ(1)/2-1)*axisZ(1,:),mp,a)
+                   (i-1)*axisX(1,:) + (j-1)*axisY(1,:) + (NgridZ(1)/2-1)*axisZ(1,:),mp,a,conf)
         end do
     end do
     
     do i = 1,NgridX(1)
         do j = 1,NgridZ(1)
                 sliceXZ(1,i,j) = coulomb_potential_single_multipole(origin(1,:) + &
-                   (i-1)*axisX(1,:) + (NgridY(1)/2-1)*axisY(1,:) + (j-1)*axisZ(1,:),mp,a)
+                   (i-1)*axisX(1,:) + (NgridY(1)/2-1)*axisY(1,:) + (j-1)*axisZ(1,:),mp,a,conf)
         end do
     end do
     
     do i = 1,NgridY(1)
         do j = 1,NgridZ(1)
                 sliceYZ(1,i,j) = coulomb_potential_single_multipole(origin(1,:) + &
-                    (NgridX(1)/2-1)*axisX(1,:) + (i-1)*axisY(1,:) + (j-1)*axisZ(1,:),mp,a)
+                    (NgridX(1)/2-1)*axisX(1,:) + (i-1)*axisY(1,:) + (j-1)*axisZ(1,:),mp,a,conf)
         end do
     end do
     
@@ -3523,16 +3551,16 @@ end subroutine calc_multipole_grid_and_slice_data
 !-------------------------------------------------------------------------------
 
 !-------------------------------------------------------------------------------
-subroutine subtract_atom_multipole_ESP_from_grid(mp,a)
+subroutine subtract_atom_multipole_ESP_from_grid(mp,a,conf)
     implicit none
-    integer :: a !input atom
-    real(rp), dimension(:) :: mp !input multipole
+    integer :: conf,a !input atom and conformer
+    real(rp), dimension(:,:) :: mp !input multipole
     integer :: i,j
 
     !calculate the esp grid generated from just this multipole and subtract from
     !total
     do i = 1,Ngrid(1)
-        esp_grid(1,i) = esp_grid(1,i) - coulomb_potential_single_multipole(gridval(1,:,i),mp,a)
+        esp_grid(1,i) = esp_grid(1,i) - coulomb_potential_single_multipole(gridval(1,:,i),mp,a,conf)
     end do
 
     !calculate the slice data from just this multipole
@@ -3540,7 +3568,7 @@ subroutine subtract_atom_multipole_ESP_from_grid(mp,a)
         do j = 1,NgridY(1)
                 sliceXY(1,i,j) = sliceXY(1,i,j) - coulomb_potential_single_multipole( &
                      origin(1,:) + (i-1)*axisX(1,:) + (j-1)*axisY(1,:) + &
-                     (NgridZ(1)/2-1)*axisZ(1,:),mp,a)
+                     (NgridZ(1)/2-1)*axisZ(1,:),mp,a,conf)
         end do
     end do
 
@@ -3548,7 +3576,7 @@ subroutine subtract_atom_multipole_ESP_from_grid(mp,a)
         do j = 1,NgridZ(1)
                 sliceXZ(1,i,j) = sliceXZ(1,i,j) - coulomb_potential_single_multipole( &
                      origin(1,:) + (i-1)*axisX(1,:) + (NgridY(1)/2-1)*axisY(1,:) + &
-                     (j-1)*axisZ(1,:),mp,a)
+                     (j-1)*axisZ(1,:),mp,a,conf)
         end do
     end do
 
@@ -3556,7 +3584,7 @@ subroutine subtract_atom_multipole_ESP_from_grid(mp,a)
         do j = 1,NgridZ(1)
                 sliceYZ(1,i,j) = sliceYZ(1,i,j) - coulomb_potential_single_multipole( &
                      origin(1,:) + (NgridX(1)/2-1)*axisX(1,:) + (i-1)*axisY(1,:) + &
-                     (j-1)*axisZ(1,:),mp,a)
+                     (j-1)*axisZ(1,:),mp,a,conf)
         end do
     end do
 
@@ -3606,40 +3634,40 @@ end subroutine subtract_charge_ESP_from_grid
 !-------------------------------------------------------------------------------
 
 !-------------------------------------------------------------------------------
-subroutine add_atom_multipole_ESP_to_grid(mp,a)
+subroutine add_atom_multipole_ESP_to_grid(mp,a,conf)
     implicit none
-    integer :: a !input atom
-    real(rp), dimension(:) :: mp !input multipole
+    integer :: conf,a !input atom and conformer
+    real(rp), dimension(:,:) :: mp !input multipole
     integer :: i,j
 
     !calculate the esp grid generated from just this multipole and add to
     !total
-    do i = 1,Ngrid(1)
-        esp_grid(1,i) = esp_grid(1,i) + coulomb_potential_single_multipole(gridval(1,:,i),mp,a)
+    do i = 1,Ngrid(conf)
+        esp_grid(conf,i) = esp_grid(conf,i) + coulomb_potential_single_multipole(gridval(conf,:,i),mp,a,conf)
     end do
 
     !calculate the slice data from just this multipole
-    do i = 1,NgridX(1)
-        do j = 1,NgridY(1)
-                sliceXY(1,i,j) = sliceXY(1,i,j) + coulomb_potential_single_multipole( &
-                     origin(1,:) + (i-1)*axisX(1,:) + (j-1)*axisY(1,:) + &
-                     (NgridZ(1)/2-1)*axisZ(1,:),mp,a)
+    do i = 1,NgridX(conf)
+        do j = 1,NgridY(conf)
+                sliceXY(conf,i,j) = sliceXY(conf,i,j) + coulomb_potential_single_multipole( &
+                     origin(conf,:) + (i-1)*axisX(conf,:) + (j-1)*axisY(conf,:) + &
+                     (NgridZ(conf)/2-1)*axisZ(conf,:),mp,a,conf)
         end do
     end do
 
-    do i = 1,NgridX(1)
-        do j = 1,NgridZ(1)
-                sliceXZ(1,i,j) = sliceXZ(1,i,j) + coulomb_potential_single_multipole( &
-                     origin(1,:) + (i-1)*axisX(1,:) + (NgridY(1)/2-1)*axisY(1,:) + &
-                     (j-1)*axisZ(1,:),mp,a)
+    do i = 1,NgridX(conf)
+        do j = 1,NgridZ(conf)
+                sliceXZ(conf,i,j) = sliceXZ(conf,i,j) + coulomb_potential_single_multipole( &
+                     origin(conf,:) + (i-1)*axisX(conf,:) + (NgridY(conf)/2-1)*axisY(conf,:) + &
+                     (j-1)*axisZ(conf,:),mp,a,conf)
         end do
     end do
 
-    do i = 1,NgridY(1)
-        do j = 1,NgridZ(1)
-                sliceYZ(1,i,j) = sliceYZ(1,i,j) + coulomb_potential_single_multipole( &
-                     origin(1,:) + (NgridX(1)/2-1)*axisX(1,:) + (i-1)*axisY(1,:) + &
-                     (j-1)*axisZ(1,:),mp,a)
+    do i = 1,NgridY(conf)
+        do j = 1,NgridZ(conf)
+                sliceYZ(conf,i,j) = sliceYZ(conf,i,j) + coulomb_potential_single_multipole( &
+                     origin(conf,:) + (NgridX(conf)/2-1)*axisX(conf,:) + (i-1)*axisY(conf,:) + &
+                     (j-1)*axisZ(conf,:),mp,a,conf)
         end do
     end do
 
@@ -3994,7 +4022,7 @@ subroutine trim_ESP_grid(l)
       i=i+1
       if(i.gt.Ngrid(l)) exit
       if(in_interaction_belt(gridval(l,:,i),vdw_grid_min_cutoff, &
-                           vdw_grid_max_cutoff,l)) then !value is NOT used for fitting
+                           vdw_grid_max_cutoff,l)) then !value is used for fitting
         tNgrid=tNgrid+1
         tgridval(:,tNgrid)=gridval(l,:,i)
         tesp_grid(tNgrid)=esp_grid(l,i)
@@ -4196,7 +4224,7 @@ subroutine read_command_line_arguments()
         write(*,'(A)',advance='no') "./"
         !$ write(*,'(A)',advance='no') "p"
         write(*,'(A)') "cubefit.x -generate [-multipole] [-ofatoms] -esp <filepath> -dens <filepath>"//&
-                       " -xyz <filepath> [-prefix <string>] [-frames <filepath>] [-v]"
+                       " -xyz <filepath> OR -mtpfile <filepath> [-prefix <string>] [-frames <filepath>] [-v]"
         write(*,*)
         write(*,'(A)') "-multipole           if present, expects multipole input, else expects charge input" 
         write(*,'(A)') "-ofatoms             if present, visualizes charge fits to individual atomic multipoles instead"
@@ -4229,15 +4257,18 @@ subroutine read_command_line_arguments()
         write(*,'(A)',advance='no') "./"
         !$ write(*,'(A)',advance='no') "p"
         write(*,'(A)') "cubefit.x -esp <filepath> -dens <filepath> [-qtot <real>] [-ncmin <int>]"//&
-                                " [-ncmax <int>] [-ntry <int>] [-prefix <string>] [-greedy <filepath>]"//&
+                                " [-ncmax <int>] [-ntry <int>] [-prefix <string>] [-greedy]"//&
                                 " [-onlymultipoles] [-xyz <filepath>] [-frames <filepath>] [-sym]"//&
-                                " [-atom <int>,...,<int>] [-freeze <int>,...,<int>] [-v]"
+                                " [-atom <int>,...,<int>] [-freeze <int>,...,<int>] [-v]"//&
+                                " [-mtpfile <filepath>]"
         write(*,*)
         write(*,'(A)') "-atom    <int<,int>> index of atom(s) to fit"
         write(*,'(A)') "-esp     <string>    filepath of the cube file containing the ESP data"
         write(*,'(A)') "                     (multiple conformers can be defined as -esp <file1> -esp <file2>)"  
         write(*,'(A)') "-dens    <string>    filepath of the cube file containing the density data" 
         write(*,'(A)') "                     (multiple conformers can be defined as -dens <file1> -dens <file2>)"
+        write(*,'(A)') "-mtpfile <string>    for atom / fragment fits. Where multiple conformers are defined, a separate"
+        write(*,'(A)') "                     multipole file is required for each conformer."
         write(*,'(A)') "-frames  <string>    filepath to the file defining axis frames (for multiple conformer fits only)"
         write(*,'(A)') "-qtot    <real>      total charge (default = 0)"
         write(*,'(A)') "-ncmin   <int>       minimum number of charges to fit (default = 2)" 
@@ -4246,10 +4277,9 @@ subroutine read_command_line_arguments()
         write(*,'(A)') "-nacmax   <int>      maximum number of charges to fit to multipoles per atom (default = 5)"
         write(*,'(A)') "-ntry    <int>       maximum number of trials per number of charges (default = 1)"   
         write(*,'(A)') "-prefix  <string>    identifier prefix for output files (needed in parallel mode to prevent overwrite)" 
-        write(*,'(A)') "-greedy  <string>    filepath of the file containing the multipoles for the greedy fit" 
+        write(*,'(A)') "-greedy              request greedy fit (also requires -mtpfile to specify multipoles to fit to)" 
         write(*,'(A)') "-onlymultipoles      stops the greedy fit after fitting atomic multipoles" 
-        write(*,'(A)') "-xyz <str1> <str2>   filepaths containing the guess (incompatible with greedy mode)", &
-          " and previously-fitted multipoles" 
+        write(*,'(A)') "-xyz <str1>          filepath containing the guess (incompatible with greedy mode)"
         write(*,'(A)') "-simplex             for refining charge models only: uses",&
           " simplex algorithm rather than D.E. (useful for final refinement with too",&
           " many charges for D.E.)"
@@ -4384,8 +4414,16 @@ subroutine read_command_line_arguments()
             call get_command_argument(i+1, arg, l)
             read(arg,'(A)',iostat = ios) input_xyzfile
             if(ios /= 0) call throw_error('Could not read command line argument "-xyz"')
-            call get_command_argument(i+2, arg, l)
-            read(arg,'(A)',iostat = ios) input_multipolefile
+!            call get_command_argument(i+2, arg, l)
+!            read(arg,'(A)',iostat = ios) input_multipolefile
+        end if
+
+        ! input fitted multipole file
+        if(arg(1:l) == '-mtpfile') then
+            Nmtp = Nmtp + 1
+            call get_command_argument(i+1, arg, l)
+            read(arg,'(A)',iostat = ios) input_multipolefile(Nmtp)
+            if(ios /= 0) call throw_error('Could not read command line argument "-mtpfile"')
         end if
        
         ! simplex refinement only
@@ -4444,9 +4482,9 @@ subroutine read_command_line_arguments()
         ! greedy mode
         if(arg(1:l) == '-greedy') then
             use_greedy_fit = .true.
-            call get_command_argument(i+1, arg, l)
-            read(arg,'(A)',iostat = ios) input_multipolefile
-            if(ios /= 0) call throw_error('Could not read command line argument "-greedy"')
+!            call get_command_argument(i+1, arg, l)
+!            read(arg,'(A)',iostat = ios) input_multipolefile(1)
+!            if(ios /= 0) call throw_error('Could not read command line argument "-greedy"')
         end if
 
         ! read a local frame definition file if we fit to multiple conformers
@@ -4482,9 +4520,10 @@ subroutine read_command_line_arguments()
         end if
         if(verbose) write(*,'(A)') "Running in analysis mode"
     else if (generate_mode) then !generate mode
-        if((trim(input_esp_cubefile(1)) == '').or.(trim(input_xyzfile) == '') &
+        if((trim(input_esp_cubefile(1)) == '').or.(trim(input_xyzfile) == '' .and. &
+            Nmtp == 0) &
            .or.(trim(input_density_cubefile(1)) == '')) then
-            call throw_error('Missing required arguments "-esp" and/or "-xyz" and/or "-dens"')
+            call throw_error('Missing required arguments "-esp" and/or "-xyz / -mtpfile" and/or "-dens"')
         end if
         if(Nconf > 2) then
             call throw_error('No more than 2 conformers (one reference, one to generate) allowed in generate mode')
