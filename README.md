@@ -1,5 +1,5 @@
 # MDCM
-Machine learning code to fit Minimal Distributed Charge Models (MDCMs)
+Machine learning code to fit Minimal Distributed Charge Models (MDCMs). Note that the developmental "MDCM-2.0" branch contains added functionality and a couple of bugfixes.
 
 ## Authors:
 MDCM scripts and code by Mike Devereux (Michael.Devereux at unibas.ch) except:
