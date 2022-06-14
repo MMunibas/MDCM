@@ -52,26 +52,31 @@ Options:
 * -qtot:  total molecular charge (a.u., default = 0)
 * -fixq:  file containing charges to freeze during fitting (optional)
 
-This code requires a Gaussian-format ESP cube file and an electron density cube file as input to provide reference data for fitting atomic multipole moments. ESP grid points inside the molecule or too far from any atom in the molecule will be excluded. The maximum rank of the fit specifies the highest ranking multipole moments that will be used to describe the ESP. The total charge refers to the total charge of the molecule, as constraints are applied to maintain this value during fitting.
+This code requires a Gaussian-format ESP cube file and an electron density cube file as input to provide reference data for fitting atomic multipole moments. ESP grid points inside the molecule or too far from any atom in the molecule will be excluded. The maximum rank of the fit specifies the highest ranking multipole moments that will be used to describe the ESP. The total charge refers to the total charge of the molecule, as constraints are applied to maintain this value during least-squares fitting.
 
 The fixq option allows the user to specify a file from a previous multipole fit (or any file in similar format), so that the charge terms can be fixed during subsequent multipole fitting. This can be useful if, for example, CHARMM charges are preferred with a purely multipolar correction. The main application, though, is to allow fitting of fragments or functional groups to multiple molecular conformers. As fragments are fitted to the multipolar ESP as reference, multipoles are required for each conformer. This can only work if the total charge of each fragment within the molecule remains fixed for all conformers, so the charges fitted for the first conformer should be applied to the remaining conformers as well.
 
 ### (p)cubefit.x
 **Atomic distributed charge fitting:**
-`pcubefit.x -greedy $FITTED-MTPL -esp $PCUBE -dens $DCUBE -nacmin $MINCHG -nacmax $MAXCHG -atom $ATOMINDEX -ntry $NTRY -onlymultipoles -v > $OUTFILE`
+`pcubefit.x -greedy -mtpfile <fitted_multipole_file> -esp <esp_cube_file> -dens <density_cube_file> -nacmin <min_chgs> -nacmax <max_chgs> -atom <atom_index> -ntry <num_tries> -onlymultipoles -gpu -v > <log_file>`
 
 Options:
-* -greedy:  use "greedy" fitting algorithm in differential evolution fitting (recommended), and define $MTPFILE containing fitted atomic multipoles
-* -esp: define Gaussian cube file "$PCUBE" containing the molecular electrostatic potential
-* -dens: define Gaussian cube file "$DCUBE" containing the molecular electron density
+* -greedy: use "greedy" fitting algorithm in differential evolution fitting (recommended), 
+* -mtpfile: specify file containing atomic multipoles previously fitted with e.g. mtpfit.py
+* -esp: specify Gaussian cube file containing the molecular electrostatic potential
+* -dens: specify Gaussian cube file containing the molecular electron density
 * -nacmin: define lowest number of charges to fit per atom (usually 1)
 * -nacmax: define highest number of charges to fit per atom (usually 3-4)
-* -atom: define index of atom to be fitted (corresponds to ordering in cube files). Fitting atoms separately allows efficient parallelization of the fitting process.
-* -ntry: set number of complete fitting runs. As the fitting code involves making random "mutations" to existing populations of candidate solutions, better results may be obtained by repeating the fitting process a few times and selecting the best result
-* -onlymultipoles: state that we want to fit multipole moments only in this step and not atomic charges
+* -atom: define index of atom to be fitted (corresponds to ordering in cube files). Fitting each atom separately allows efficient parallelization of the fitting process.
+* -ntry: set number of complete fitting runs. As the fitting code is stochastic, involving random "mutations" to existing populations of candidate solutions, better results can be obtained by repeating the fitting process a few times and selecting the best result
+* -onlymultipoles: state that we want to fit atomic charges to multipole moments only in this step and not proceed to full molecular ESP fit
 * -sym: state that we want to apply symmetry constraints so that atomic charge models respect the molecular symmetry
 * -gpu: state that we want to run with CUDA support
 * -v: verbose output
+
+This DE step uses the atomic multipoles from the previous step to construct an "atomic ESP" grid that is used to fit distributed charge models for each atom. We typically fit between 1 and 4 charges per atom, which makes subsequent molecular fitting computationally tractable and still yields molecular charge models of accuracy comparable to a fitted multipole expansion truncated at quadrupole.
+
+The purpose of the atomic charge models is to provide an initial population for subsequent DE fitting that is already focused on promising regions of parameter space. Starting from truly random initial parameter values requires much more exploration of the full-dimensional parameter space when fitting the molecular models, which becomes intractable.
 
 **Fragment distributed charge fitting:**
 `pcubefit.x -greedy $MTPFILE -esp $PCUBE -dens $DCUBE -ncmin $MINCHG -ncmax $MAXCHG -atom $ATOMLIST -nacmax $MAXCHG -ntry $NTRY -v > $OUTFILE`
