@@ -58,7 +58,7 @@ The fixq option allows the user to specify a file from a previous multipole fit 
 
 ### (p)cubefit.x
 **Atomic distributed charge fitting:**
-`pcubefit.x -greedy -mtpfile <fitted_multipole_file> -esp <esp_cube_file> -dens <density_cube_file> -nacmin <min_chgs> -nacmax <max_chgs> -atom <atom_index> -ntry <num_tries> -onlymultipoles -gpu -v > <log_file>`
+`pcubefit.x -greedy -mtpfile <fitted_multipole_file> -esp <esp_cube_file> -dens <density_cube_file> -nacmin <min_chgs> -nacmax <max_chgs> -atom <atom_index> -ntry <num_tries> -onlymultipoles -sym -gpu -v > <log_file>`
 
 Options:
 * -greedy: use "greedy" fitting algorithm in differential evolution fitting (recommended), 
@@ -70,9 +70,9 @@ Options:
 * -atom: define index of atom to be fitted (corresponds to ordering in cube files). Fitting each atom separately allows efficient parallelization of the fitting process.
 * -ntry: set number of complete fitting runs. As the fitting code is stochastic, involving random "mutations" to existing populations of candidate solutions, better results can be obtained by repeating the fitting process a few times and selecting the best result
 * -onlymultipoles: state that we want to fit atomic charges to multipole moments only in this step and not proceed to full molecular ESP fit
-* -sym: state that we want to apply symmetry constraints so that atomic charge models respect the molecular symmetry
-* -gpu: state that we want to run with CUDA support
-* -v: verbose output
+* -sym: state that we want to apply symmetry constraints so that atomic charge models respect the molecular symmetry (optional)
+* -gpu: state that we want to run with CUDA support (optional)
+* -v: verbose output (optional)
 
 This DE step uses the atomic multipoles from the previous step to construct an "atomic ESP" grid that is used to fit distributed charge models for each atom. We typically fit between 1 and 4 charges per atom, which makes subsequent molecular fitting computationally tractable and still yields molecular charge models of accuracy comparable to a fitted multipole expansion truncated at quadrupole.
 
