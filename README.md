@@ -1,7 +1,7 @@
 # MDCM-2.0
 Updated machine learning code to fit Minimal Distributed Charge Models (MDCMs). Features include:
 
-* Fitting atom-centered multipolar charge models to the molecular ESP, using either constrained Least-Squares fitting (recommended) or Differential Evolution (DE)
+* Fitting atom-centered multipolar charge models to the molecular ESP, using either constrained Least-Squares fitting (recommended) or Differential Evolution (DE) (not recommended)
 * Fitting distributed atomic charge models that can be combined to provide an initial population for subsequent DE fitting of molecules or fragments
 * DE fitting of molecular fragments or functional groups to the multipolar ESP, allowing fitting of larger molecules with more charges than would be computationally feasible by fitting all charges in the molecule simultaneously
 * Combination of fitted fragment models to create a good initial guess for refinement of a total molecular model
@@ -43,13 +43,18 @@ your PATH. The make command is then "make cuda".
 ## Running:
 ### mtpfit.py
 **Fit atomic multipole moments to the molecular electrostatic potential:**
-`mtpfit.py -pot $PCUBE -dens $DCUBE -lmax 5 -qtot 0.0`
+`mtpfit.py -pot <cubefile> -dens <cubefile> -lmax <max_rank> -qtot <molecular charge> -fixq <`
 
 Options:
-* -pot:   MEP cube file
+* -pot:   MEP cube file (Gaussian format)
 * -dens:  electron density cube file
-* -lmax:  maximum rank for atomic multipoles (ditriantapole)
-* -qtot:  total molecular charge
+* -lmax:  maximum rank for atomic multipoles (between 0 and 5, i.e. charge and ditriantapole)
+* -qtot:  total molecular charge (a.u., default = 0)
+* -fixq:  file containing charges to freeze during fitting
+
+This code requires an ESP and an electron density cube file as input to provide reference data for fitting. Points inside the molecule or too far from any atom in the molecule will be excluded. The maximum rank of the fit specifies the highest ranking multipole moments that will be used to describe the ESP. The total charge refers to the total charge of the molecule, as constraints are applied to maintain this value during fitting.
+
+The fixq option allows the user to specify a file from a previous multipole fit (or any file in similar format), so that the charge terms can be fixed during subsequent multipole fitting. This can be useful if, for example, CHARMM charges are preferred with a purely multipolar correction. The main application, though, is to allow fitting of fragments or functional groups to multiple molecular conformers. As fragements are fitted to the multipolar ESP as reference, multipoles are required for each conformer. This can only work if the total fragment charge remains fixed for each conformer, so the charges fitted for the first conformer are also applied to the remaining conformers using this option.
 
 ### (p)cubefit.x
 **Atomic distributed charge fitting:**
