@@ -50,11 +50,11 @@ Options:
 * -dens:  electron density cube file
 * -lmax:  maximum rank for atomic multipoles (between 0 and 5, i.e. charge and ditriantapole)
 * -qtot:  total molecular charge (a.u., default = 0)
-* -fixq:  file containing charges to freeze during fitting
+* -fixq:  file containing charges to freeze during fitting (optional)
 
-This code requires an ESP and an electron density cube file as input to provide reference data for fitting. Points inside the molecule or too far from any atom in the molecule will be excluded. The maximum rank of the fit specifies the highest ranking multipole moments that will be used to describe the ESP. The total charge refers to the total charge of the molecule, as constraints are applied to maintain this value during fitting.
+This code requires a Gaussian-format ESP cube file and an electron density cube file as input to provide reference data for fitting atomic multipole moments. ESP grid points inside the molecule or too far from any atom in the molecule will be excluded. The maximum rank of the fit specifies the highest ranking multipole moments that will be used to describe the ESP. The total charge refers to the total charge of the molecule, as constraints are applied to maintain this value during fitting.
 
-The fixq option allows the user to specify a file from a previous multipole fit (or any file in similar format), so that the charge terms can be fixed during subsequent multipole fitting. This can be useful if, for example, CHARMM charges are preferred with a purely multipolar correction. The main application, though, is to allow fitting of fragments or functional groups to multiple molecular conformers. As fragements are fitted to the multipolar ESP as reference, multipoles are required for each conformer. This can only work if the total fragment charge remains fixed for each conformer, so the charges fitted for the first conformer are also applied to the remaining conformers using this option.
+The fixq option allows the user to specify a file from a previous multipole fit (or any file in similar format), so that the charge terms can be fixed during subsequent multipole fitting. This can be useful if, for example, CHARMM charges are preferred with a purely multipolar correction. The main application, though, is to allow fitting of fragments or functional groups to multiple molecular conformers. As fragments are fitted to the multipolar ESP as reference, multipoles are required for each conformer. This can only work if the total charge of each fragment within the molecule remains fixed for all conformers, so the charges fitted for the first conformer should be applied to the remaining conformers as well.
 
 ### (p)cubefit.x
 **Atomic distributed charge fitting:**
