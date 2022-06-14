@@ -1,6 +1,15 @@
 # MDCM-2.0
-Machine learning code to fit Minimal Distributed Charge Models (MDCMs) with added
-symmetry constraints and GPU-support
+Updated machine learning code to fit Minimal Distributed Charge Models (MDCMs). Features include:
+
+* Fitting atom-centered multipolar charge models to the molecular ESP, using either constrained Least-Squares fitting (recommended) or Differential Evolution (DE)
+* Fitting distributed atomic charge models that can be combined to provide an initial population for subsequent DE fitting of molecules or fragments
+* DE fitting of molecular fragments or functional groups to the multipolar ESP, allowing fitting of larger molecules with more charges than would be computationally feasible by fitting all charges in the molecule simultaneously
+* Combination of fitted fragment models to create a good initial guess for refinement of a total molecular model
+* DE and / or simplex fitting and refinement of molecular charge models to the reference ESP
+* Symmetry-constrained fitting to ensure distributed charge models possess the same symmetry as the molecule they describe
+* GPU support (still developmental)
+* Fitting to multiple conformers simultaneously by defining local axes and two or more reference ESP grids for different conformers. This helps to avoid creating models, in particular for flexible molecules, that are too finely tuned to a single conformer and perform poorly upon conformational change.
+
 
 ## Authors:
 MDCM scripts and code by Mike Devereux (Michael.Devereux at unibas.ch) except:
