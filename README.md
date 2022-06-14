@@ -26,7 +26,7 @@ Additional code required for multipole cube generation example:
 
 ## References:
 1. Unke, O. T.; Devereux, M.; Meuwly, M.; Minimal distributed charges:  Multipolar quality at the cost of point charge electrostatics. J. Chem. Phys.2017,147, 161712
-1. Devereux, M.; Pezzella, M.; Raghunathan, S.; Meuwly, M.; Polarizable Multipolar Molecular Dynamics Using Distributed Point Charges. Submitted Aug. 2020
+1. Devereux, M.; Pezzella, M.; Raghunathan, S.; Meuwly, M.; Polarizable Multipolar Molecular Dynamics Using Distributed Point Charges. J. Chem. Theory Comput. 2020, 16, 7267
 
 ## Code Overview:
 * Various new and pre-existing utilities are combined. The main fitting routines for MDCM charges are located in bin/src and are compiled to produce (p)cubefit.x.
@@ -38,7 +38,7 @@ Additional code required for multipole cube generation example:
 * Only the MDCM Fortran code requires compilation. Type "make serial" or "make parallel" in the folder that contains the Makefile to create two binaries, *cubefit.x* and *pcubefit.x*. *pcubefit.x* is parallelized using OpenMP, *cubefit.x* is serial code.
 * To compile the CUDA code you need to have CUDA-Fortran installed on your computer and in
 your PATH. The make command is then "make cuda".
-* Note that due to the nature of the fitting procedure it is usually better to run more fits simultaneously than a few fits serially using more cores. For very long fits (many charges and / or ESP fitting points in the grid) the GPU code can give noticeable improvements.
+* Note that due to the nature of the fitting procedure it is usually better to run more fits simultaneously than a few fits serially using more cores. For very long fits (many charges and / or ESP fitting points in the grid) more CPU cores or a GPU can give noticeable improvements.
 
 ## Running:
 ### mtpfit.py
