@@ -151,6 +151,24 @@ The -converge option can also be useful for refinement in improving computationa
 
 Finally, this option can be used to fit entire molecules directly to the reference ESP without needing the fragment fitting step for molecules that are sufficiently small / that require sufficiently few charges. In this context the model to be refined is constructed from the atomic charge models that were fitted to the atomic multipolar ESP, as described above.
 
+**Analysis: Creating cube files**
+pcubefit.x -generate -xyz <charges_file> -esp <esp_cube_file> -dens <density_cube_file> [-frames <axis_frames_file> -esp <esp_cube_file_2> -dens <density_cube_file_2>] -v
+
+* -xyz: defines the fitted charge or multipoole model that we want to use to generate an ESP cube file
+* -multipole: specifies that we want to generate a multipolar ESP from a fitted multipole model instead of using a fitted charge model (optional)
+* -esp: defines the Gaussian format cube file containing the reference ESP
+* -dens: defines the Gaussian format cube file containing the reference electron density
+* -frames: defines the local axis frames if we want to generate a cube file for another conformer (optional)
+* -v: verbose output (optional)
+
+This utility is useful for analyzing the quality of models and for visualizing issues with the fitted ESP. By default the molecular geometry and the ESP grid specifications are taken from the supplied cube files, then the requested fitted charge or multipolar model is used to generate the fitted ESP at each point across the reference grid. As such, the fitted grid and the reference grid can subsequently be pointwise compared to evaluate the quality of the model.
+
+There is also the option to supply a local reference axis frames file (see above) with Gaussian cube files representing another conformer using the -frames option with a second -esp and -dens option. In this case the charge (not multipolar!) model that was fitted for the conformer of cube file 1 is transformed using the local reference axes to conformer to, and used to generate the ESP of that conformer using the atomic coordinates and ESP grid specifications in cube file 2. This option can be used to evaluate the preformance of a model fitted for one conformer (or set of conformers) when applied to another conformer, checking how robust the model is to conformational change.
+
+**Analysis: comparing cube files**
+pcubefit.x -v -analysis -esp $PCUBE -esp2 ${NAME}-conf1.cube -dens $DCUBE > analyze-cube-${NAME}-conf1.log
+
+
 ## Examples
 The simplest way to use the code for your own system is to adapt one of the examples provided. They are deliberately quite long-winded and modular to allow easy adaptation to new cases.
 ### naptha
