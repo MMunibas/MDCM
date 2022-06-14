@@ -127,7 +127,7 @@ Options are set inside the script by defining the shell variables:
 * MAXCHGS: the maximum number of charges for the molecular charge model
 
 **Molecular MDCM refinement**
-`pcubefit.x -xyz <charges_file> -mtpfile <fitted_multipole_file> -esp <esp_cube_file> -dens <density_cube_file> [-frames <axis_frames_file> -mtpfile <fitted_multipole_file> -esp <esp_cube_file> -dens <density_cube_file> ...] -nacmax <max_chgs> -simplex -ntry $NTRY -sym -gpu -v > <log_file>
+`pcubefit.x -xyz <charges_file> -mtpfile <fitted_multipole_file> -esp <esp_cube_file> -dens <density_cube_file> [-frames <axis_frames_file> -mtpfile <fitted_multipole_file> -esp <esp_cube_file> -dens <density_cube_file> ...] -nacmax <max_chgs> -simplex -ntry $NTRY -sym -gpu -v > <log_file>`
 
 Options:
 * -xyz: defines the file containing the molecular charge model to be refined (usually the charge model created by combining fitted fragment models, or from a previous full-molecule fit)
@@ -152,7 +152,7 @@ The -converge option can also be useful for refinement in improving computationa
 Finally, this option can be used to fit entire molecules directly to the reference ESP without needing the fragment fitting step for molecules that are sufficiently small / that require sufficiently few charges. In this context the model to be refined is constructed from the atomic charge models that were fitted to the atomic multipolar ESP, as described above.
 
 **Analysis: Creating cube files**
-pcubefit.x -generate -xyz <charges_file> -esp <esp_cube_file> -dens <density_cube_file> [-frames <axis_frames_file> -esp <esp_cube_file_2> -dens <density_cube_file_2>] -v
+`pcubefit.x -generate -xyz <charges_file> -esp <esp_cube_file> -dens <density_cube_file> [-frames <axis_frames_file> -esp <esp_cube_file_2> -dens <density_cube_file_2>] -v`
 
 * -xyz: defines the fitted charge or multipoole model that we want to use to generate an ESP cube file
 * -multipole: specifies that we want to generate a multipolar ESP from a fitted multipole model instead of using a fitted charge model (optional)
@@ -166,8 +166,14 @@ This utility is useful for analyzing the quality of models and for visualizing i
 There is also the option to supply a local reference axis frames file (see above) with Gaussian cube files representing another conformer using the -frames option with a second -esp and -dens option. In this case the charge (not multipolar!) model that was fitted for the conformer of cube file 1 is transformed using the local reference axes to conformer to, and used to generate the ESP of that conformer using the atomic coordinates and ESP grid specifications in cube file 2. This option can be used to evaluate the preformance of a model fitted for one conformer (or set of conformers) when applied to another conformer, checking how robust the model is to conformational change.
 
 **Analysis: comparing cube files**
-pcubefit.x -v -analysis -esp $PCUBE -esp2 ${NAME}-conf1.cube -dens $DCUBE > analyze-cube-${NAME}-conf1.log
+`pcubefit.x -analysis -esp <esp_cube_file> -esp2 <esp_cube_file_2> -dens <density_cube_file> -v > <log_file>`
 
+* -esp: Gaussian format cube file containing reference ESP
+* -esp2: Gaussian format cube file containing ESP to compare to reference
+* -dens: Gaussian format cube file containing electron density
+* -v: verbose output (optional)
+
+This mode is used to quantatively compare the ESP in different regions (close, near, far) between two supplied Gaussian-format cube files. This is typically used to compare the ESP from a fitted model to the reference ESP that it was fitted to. In addition to a statistical analysis, a new Gaussian format cube file quantifying the error in ESP across the same grid is created and can be used to visualize spatial distribution of the error in different planes or mapped onto a molecular surface.
 
 ## Examples
 The simplest way to use the code for your own system is to adapt one of the examples provided. They are deliberately quite long-winded and modular to allow easy adaptation to new cases.
