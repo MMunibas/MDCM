@@ -79,18 +79,40 @@ This DE step uses the atomic multipoles from the previous step to construct an "
 The purpose of the atomic charge models is to provide an initial population for subsequent DE fitting that is already focused on promising regions of parameter space. Starting from truly random initial parameter values requires much more exploration of the full-dimensional parameter space when fitting the molecular models, which becomes intractable.
 
 **Fragment distributed charge fitting:**
-`pcubefit.x -greedy $MTPFILE -esp $PCUBE -dens $DCUBE -ncmin $MINCHG -ncmax $MAXCHG -atom $ATOMLIST -nacmax $MAXCHG -ntry $NTRY -v > $OUTFILE`
+`pcubefit.x -greedy -mtpfile <fitted_multipole_file> -esp <esp_cube_file> -dens <density_cube_file> [-frames <axis_frames_file> -mtpfile <fitted_multipole_file_2> -esp <esp_cube_file_2> -dens <density_cube_file_2>...] -ncmin <min_chgs> -ncmax <max_chgs> -atom <list> -nacmax <max_chgs> -ntry <num_fits> -converge <cutoff> -v > $OUTFILE`
 
 Options:
-* -greedy:  use "greedy" fitting algorithm in differential evolution fitting (recommended), and define $MTPFILE containing fitted atomic multipoles
-* -esp: define Gaussian cube file "$PCUBE" containing the molecular electrostatic potential
-* -dens: define Gaussian cube file "$DCUBE" containing the molecular electron density
-* -nacmax: the highest number of charges per atom used during atom fitting in the previous step
+* -greedy: use "greedy" fitting algorithm in differential evolution fitting (recommended)
+* -mtpfile: define file containing fitted atomic multipoles
+* -esp: define Gaussian cube file containing the molecular electrostatic potential
+* -dens: define Gaussian cube file containing the molecular electron density
+* -nacmax: the highest number of charges per atom used during atom fitting in the previous (atom-fitting) step
 * -ncmin: define lowest number of charges to fit for this fragment
 * -ncmax: define highest number of charges to fit for this fragment
-* -atom: define a comma-separated list of atom indices to be fitted without spaces (indices correspond to atom ordering in cube files). Fitting fragments allows efficient fitting of models with too many charges to fit efficiently all at once
+* -atom: define a comma-separated list of atom indices to be fitted without spaces (indices correspond to atom ordering in cube files). 
 * -ntry: set number of complete fitting runs. As the fitting code involves making random "mutations" to existing populations of candidate solutions, better results may be obtained by repeating the fitting process a few times and selecting the best result
+* -frames: if fitting to multiple conformers, reference axis frames must be defined
+* -converge: user-specified convergence criterion based on change in RMSE over time
 * -v: verbose output
+
+Fitting fragments allows efficient fitting of models with too many charges to fit efficiently all at once. The molecule is divided into fragments by the user, to create fragments that are as large as possible while remaining computationally manageable. The total number of charges to fit for each fragment can be defined as a range, but it is preferable to run a separate fit for each number of charges to allow efficient parallelization.
+
+The atomic multipole file provided is used to generate the fragment ESP from the multipoles of the atoms comprising the fragment. As such, the reference ESP cube file is not really used here to provide reference data.
+
+The initial guess model is created from the combination of atomic charge models from the previous step that are predicted to yield the lowest RMSE when combined for a given number of charges.
+
+Multiple conformers can be used as a reference to make resulting models more robust to conformational change. A set of local reference axes must be provided to allow each candidate model to be transformed to each conformation, using the file defined by the "-frames" flag. The format is e.g.:
+
+ALA3
+2    1    4   BO
+...
+34   33   31  BO
+
+The first line gives the molecule name, subsequent lines contains groups of 3 atom indices that are used to create local axis frames (see https://doi.org/10.1021/ct500511t), the "BO" (or "BI") specfy either the bond-type axis systems described in the reference or a related axis system where the z-axis of the 2nd atom points along the A-B-C bisector, rather than along bond B-A.
+
+After specifying -frames, a separate atomic multipole file (see notes on constraining fragment charge during multipole fitting above), ESP cube file and density cube file is provided for each conformer.
+
+The -converge option can be useful for larger fitting problems. DE fitting of the ESP typically converges quite rapidly to an RMSE within ca. 0.01 kcal/mol of the final solution, but optimization continues as long as the population is still diverse in case a new and better minimum is found. The user can optionally specify looser convergence criteria by specifying a threshold. If the best DE solution improves by less than this threshold over 1000 fitting generations then the process exits early, typically saving a significant amount of time at little cost in accuracy. Note that as long as a diverse fitting population remains this approach potentially misses significantly improved solutions, however.
 
 **Combining fragment models to build molecular models**
 `combine.sh`
