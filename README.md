@@ -79,7 +79,7 @@ This DE step uses the atomic multipoles from the previous step to construct an "
 The purpose of the atomic charge models is to provide an initial population for subsequent DE fitting that is already focused on promising regions of parameter space. Starting from truly random initial parameter values requires much more exploration of the full-dimensional parameter space when fitting the molecular models, which becomes intractable.
 
 **Fragment distributed charge fitting:**
-`pcubefit.x -greedy -mtpfile <fitted_multipole_file> -esp <esp_cube_file> -dens <density_cube_file> [-frames <axis_frames_file> -mtpfile <fitted_multipole_file_2> -esp <esp_cube_file_2> -dens <density_cube_file_2>...] -ncmin <min_chgs> -ncmax <max_chgs> -atom <list> -nacmax <max_chgs> -ntry <num_fits> -converge <cutoff> -v > $OUTFILE`
+`pcubefit.x -greedy -mtpfile <fitted_multipole_file> -esp <esp_cube_file> -dens <density_cube_file> [-frames <axis_frames_file> -mtpfile <fitted_multipole_file_2> -esp <esp_cube_file_2> -dens <density_cube_file_2>...] -ncmin <min_chgs> -ncmax <max_chgs> -atom <list> -nacmax <max_chgs> -ntry <num_fits> -converge <cutoff> -gpu -v > $OUTFILE`
 
 Options:
 * -greedy: use "greedy" fitting algorithm in differential evolution fitting (recommended)
@@ -91,9 +91,10 @@ Options:
 * -ncmax: define highest number of charges to fit for this fragment
 * -atom: define a comma-separated list of atom indices to be fitted without spaces (indices correspond to atom ordering in cube files). 
 * -ntry: set number of complete fitting runs. As the fitting code involves making random "mutations" to existing populations of candidate solutions, better results may be obtained by repeating the fitting process a few times and selecting the best result
-* -frames: if fitting to multiple conformers, reference axis frames must be defined
-* -converge: user-specified convergence criterion based on change in RMSE over time
-* -v: verbose output
+* -frames: if fitting to multiple conformers, reference axis frames must be defined (optional)
+* -converge: user-specified convergence criterion based on change in RMSE over time (optional)
+* -gpu: use a GPU to evaluate the ESP (optional)
+* -v: verbose output (optional)
 
 Fitting fragments allows efficient fitting of models with too many charges to fit efficiently all at once. The molecule is divided into fragments by the user, to create fragments that are as large as possible while remaining computationally manageable. The total number of charges to fit for each fragment can be defined as a range, but it is preferable to run a separate fit for each number of charges to allow efficient parallelization.
 
@@ -126,17 +127,29 @@ Options are set inside the script by defining the shell variables:
 * MAXCHGS: the maximum number of charges for the molecular charge model
 
 **Molecular MDCM refinement**
-`pcubefit.x -xyz $INITIALXYZ $MTPFILE -esp $PCUBE -dens $DCUBE -nacmax $MAXATMCHG -ntry $NTRY -v > $OUTFILE`
+`pcubefit.x -xyz <charges_file> -mtpfile <fitted_multipole_file> -esp <esp_cube_file> -dens <density_cube_file> [-frames <axis_frames_file> -mtpfile <fitted_multipole_file> -esp <esp_cube_file> -dens <density_cube_file> ...] -nacmax <max_chgs> -simplex -ntry $NTRY -sym -gpu -v > <log_file>
 
 Options:
-* -xyz: defines the file containing the molecular charge model to be refined (usually the charge model created by combining fitted fragment models), and the file containing the fitted atomic multipoles
-* -esp: define Gaussian cube file "$PCUBE" containing the molecular electrostatic potential
-* -dens: define Gaussian cube file "$DCUBE" containing the molecular electron density
+* -xyz: defines the file containing the molecular charge model to be refined (usually the charge model created by combining fitted fragment models, or from a previous full-molecule fit)
+* -mtpfile: the file containing the fitted atomic multipoles
+* -esp: define Gaussian cube file containing the molecular electrostatic potential
+* -dens: define Gaussian cube file containing the molecular electron density
 * -nacmax: the highest number of charges per atom used during atom fitting in the atomic charge fitting step
 * -ntry: set number of complete fitting runs. As the fitting code involves making random "mutations" to existing populations of candidate solutions, better results may be obtained by repeating the fitting process a few times and selecting the best result
-* -sym: state that we want to apply symmetry constraints so that atomic charge models respect the molecular symmetry
-* -gpu: state that we want to run with CUDA support
-* -v: verbose output
+* -sym: state that we want to apply symmetry constraints so that atomic charge models respect the molecular symmetry (optional)
+* -gpu: state that we want to run with CUDA support (optional)
+* -frames: if fitting to multiple conformers, reference axis frames must be defined (optional)
+* -converge: user-specified convergence criterion based on change in RMSE over time (optional)
+* -simplex: use simplex refinement only and no DE to make large fitting problems tractable (optional)
+* -v: verbose output (optional)
+
+Model refinement is a critical step when fragment fitting, as the individual fragments fitted to multipolar ESPs do not yet yield an optimal solution when combined to describe the molecular ESP. Depending on the size of the total system it may not be feasible to run DE optimization on the entire system, and as we should be reasonably close to minimum after fragment fitting the "-simplex" option is often an effective alternative to create a refined model with many charges.
+
+It is also possible to refine existing models, for example by adding additional conformers with the "-frames" flag and additional -esp, -dens and -mtpfile flags as described for fragment fitting.
+
+The -converge option can also be useful for refinement in improving computational feasibility, as described for fragment fitting.
+
+Finally, this option can be used to fit entire molecules directly to the reference ESP without needing the fragment fitting step for molecules that are sufficiently small / that require sufficiently few charges. In this context the model to be refined is constructed from the atomic charge models that were fitted to the atomic multipolar ESP, as described above.
 
 ## Examples
 The simplest way to use the code for your own system is to adapt one of the examples provided. They are deliberately quite long-winded and modular to allow easy adaptation to new cases.
