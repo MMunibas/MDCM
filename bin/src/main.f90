@@ -183,6 +183,9 @@ integer :: Nframes ! number of local axis frames
 real(rp), dimension(:,:,:), allocatable :: ex1,ey1,ez1,ex2,ey2,ez2,ex3,ey3,ez3 ! local axes
 character(len=2), dimension(:), allocatable :: frametypes ! can be bond or bisector-type local axis frame
 
+! for user-defined convergence criteria (based only on change in RMSE over 1000 steps)
+real(rp) :: dcut
+
 ! for error handling
 integer :: ios
 logical :: file_exists
@@ -195,6 +198,7 @@ real(rp) :: tmp, RMSE_best, RMSE_tmp, MAE_tmp, maxAE_tmp, lrmse_best
 Nconf = 0
 Nmtp = 0
 NgridrTot = 0
+dcut=0.d0
 
 call system("mkdir -p slices")
 
@@ -454,7 +458,7 @@ if(fit_multipoles) then
         do try = 1,num_trials
             if(verbose) write(*,'(A,I0)') "Fitting "//trim(dummystring)//" expansion, try ", try
             call DE_optimize(rmse_multipole,feasible_multipole,sum_constr_multipole,&
-                             multipole(1,:),guess=multipole_best(1,:)) 
+                             multipole(1,:),guess=multipole_best(1,:),dcut=dcut) 
             RMSE_tmp = rmse_multipole(multipole(1,:))
             if(verbose) write(*,'(A,ES23.9,A)') "RMSE ", RMSE_tmp, " Hartree"
             if(RMSE_tmp < RMSE_best) then
@@ -707,13 +711,14 @@ if(use_greedy_fit) then
                                set_Nprint           = 100)
                   call DE_optimize(sym_atm_rmse_qtot,sym_atm_feasible,sym_sum_atm_constr,&
                         sym_multipole_solutions(1:sqdim,num_charges,a),&
-                        init_pop=sym_init_pop_multipole)
+                        init_pop=sym_init_pop_multipole,dcut=dcut)
                   call spawn_sym_chgs(sym_multipole_solutions(1:sqdim,num_charges,a),&
                         multipole_solutions(1:qdim,num_charges,a),&
                         num_charges,symFitAtms,num_symFitAtms,total_charge,.false.)
                 else
                   call DE_optimize(rmse_qtot,feasible,sum_constr,&
-                        multipole_solutions(1:qdim,num_charges,a),init_pop=init_pop_multipole)
+                        multipole_solutions(1:qdim,num_charges,a),&
+                        init_pop=init_pop_multipole,dcut=dcut)
                 endif
 
                 ! measure the quality of the fit
@@ -1036,7 +1041,8 @@ if(refine_solution) then
           endif
           call DE_simplex(rmse_qtot,feasible,charges(1:qdim))
         else
-          call DE_optimize(rmse_qtot,feasible,sum_constr,charges(1:qdim),guess=charges(1:qdim))
+          call DE_optimize(rmse_qtot,feasible,sum_constr,charges(1:qdim),&
+                           guess=charges(1:qdim),dcut=dcut)
           if(verbose) write(*,'(A,I0,A,I0)') "Starting refinement for ",num_charges," charges, trial ",try
         endif
         ! measure the quality of the fit
@@ -1190,15 +1196,17 @@ do num_charges = num_charges_min,num_charges_max
                        set_verbose          = verbose,                 &
                        set_Nprint           = 100)
           call DE_optimize(sym_rmse_qtot,sym_feasible,sym_sum_constr,&
-                sym_charges(1:sqdim),init_pop=sym_init_pop)
+                sym_charges(1:sqdim),init_pop=sym_init_pop,dcut=dcut)
           call spawn_sym_chgs(sym_charges(1:sqdim),&
                 charges,&
                 num_charges,symFitAtms,num_symFitAtms,total_charge,.true.)
         else
           if(use_greedy_fit) then
-              call DE_optimize(rmse_qtot,feasible,sum_constr,charges(1:qdim),init_pop=init_pop_greedy)
+              call DE_optimize(rmse_qtot,feasible,sum_constr,charges(1:qdim),&
+                               init_pop=init_pop_greedy,dcut=dcut)
           else
-              call DE_optimize(rmse_qtot,feasible,sum_constr,charges(1:qdim),init_pop=init_pop)
+              call DE_optimize(rmse_qtot,feasible,sum_constr,charges(1:qdim),&
+                               init_pop=init_pop,dcut=dcut)
           end if
         endif
         ! measure the quality of the fit
@@ -4260,7 +4268,7 @@ subroutine read_command_line_arguments()
                                 " [-ncmax <int>] [-ntry <int>] [-prefix <string>] [-greedy]"//&
                                 " [-onlymultipoles] [-xyz <filepath>] [-frames <filepath>] [-sym]"//&
                                 " [-atom <int>,...,<int>] [-freeze <int>,...,<int>] [-v]"//&
-                                " [-mtpfile <filepath>]"
+                                " [-mtpfile <filepath>] [-converge <real>]"
         write(*,*)
         write(*,'(A)') "-atom    <int<,int>> index of atom(s) to fit"
         write(*,'(A)') "-esp     <string>    filepath of the cube file containing the ESP data"
@@ -4280,6 +4288,9 @@ subroutine read_command_line_arguments()
         write(*,'(A)') "-greedy              request greedy fit (also requires -mtpfile to specify multipoles to fit to)" 
         write(*,'(A)') "-onlymultipoles      stops the greedy fit after fitting atomic multipoles" 
         write(*,'(A)') "-xyz <str1>          filepath containing the guess (incompatible with greedy mode)"
+        write(*,'(A)') "-converge <real>     user-supplied convergence criterion: exit fitting early"
+        write(*,'(A)') "                     if change in RMSE over 1000 steps is lower than this"
+        write(*,'(A)') "                     threshold (kcal/mol)"
         write(*,'(A)') "-simplex             for refining charge models only: uses",&
           " simplex algorithm rather than D.E. (useful for final refinement with too",&
           " many charges for D.E.)"
@@ -4424,6 +4435,13 @@ subroutine read_command_line_arguments()
             call get_command_argument(i+1, arg, l)
             read(arg,'(A)',iostat = ios) input_multipolefile(Nmtp)
             if(ios /= 0) call throw_error('Could not read command line argument "-mtpfile"')
+        end if
+
+        ! user-defined convergence criteria (kcal/mol)
+        if(arg(1:l) == '-converge') then
+          call get_command_argument(i+1, arg, l)
+            read(arg,*,iostat = ios) dcut
+            dcut=dcut/hartree2kcal !convert from kcal/mol to Hartree
         end if
        
         ! simplex refinement only

@@ -404,7 +404,7 @@ subroutine DE_exit()
     if(allocated(rng))          deallocate(rng)
 end subroutine DE_exit
 
-subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
+subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop,dcut)
     implicit none
     real(rp), dimension(:) :: x
     real(rp), dimension(size(x, dim=1)), intent(in), optional :: guess
@@ -438,8 +438,9 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
     real(rp), dimension(:), allocatable :: child, mutant
 !    real(rp), parameter :: eps = 1.e-12_rp
     real(rp), parameter :: eps = 1.e-9_rp
+    real(rp) :: dcut,fpop_old !optional convergence cutoff for accelerated fitting
     real(rp) :: ranr, f, constr, popSizer, fbestlast
-    integer :: gen, p, d, c, rani, bestindx, dum, mutVar, bestlast, t
+    integer :: gen, p, d, c, i, rani, bestindx, dum, mutVar, bestlast, t
 
     logical :: converged, fsble 
     !# $omp threadprivate(m,child,mutant)
@@ -675,9 +676,21 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
         bestindx = find_best()
             
         ! check for convergence via cost function diversity check
-        if(sum(sqrt((fpop-fpop(bestindx))**2))/popSizer < eps) then
+        if(sqrt(sum((fpop-fpop(bestindx))**2)/popSizer) < eps) then
             converged = .true.
             if(verbose) write(*,'(A,I0,A)') "population converged towards a single solution after ", gen," generations."
+        end if
+
+        ! optionally check for convergence based purely on cost function improvement over
+        ! last 1000 generations (1000 is a hardcoded, arbitrary parameter)
+        if(gen.eq.1) fpop_old=fpop(bestindx)
+        if(dcut.ne.0.d0.and.modulo(gen,1000) == 0) then
+          if(abs(fpop_old-fpop(bestindx)).gt.abs(dcut))then
+            fpop_old=fpop(bestindx)
+          else
+            converged = .true.
+            if(verbose) write(*,'(A,I0,A)') "user-defined convergence criteria met after ", gen," generations."
+          endif
         end if
     end do
     ! store the best solution as return value
