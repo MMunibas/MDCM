@@ -152,7 +152,7 @@ The -converge option can also be useful for refinement in improving computationa
 Finally, this option can be used to fit entire molecules directly to the reference ESP without needing the fragment fitting step for molecules that are sufficiently small / that require sufficiently few charges. In this context the model to be refined is constructed from the atomic charge models that were fitted to the atomic multipolar ESP, as described above.
 
 **Analysis: Creating cube files**
-`pcubefit.x -generate -xyz <charges_file> -esp <esp_cube_file> -dens <density_cube_file> [-frames <axis_frames_file> -esp <esp_cube_file_2> -dens <density_cube_file_2>] -v`
+`pcubefit.x -generate [-xyz <charges_file>] [-multipole -mtpfile <fitted_multipole_file>] -esp <esp_cube_file> -dens <density_cube_file> [-frames <axis_frames_file> -esp <esp_cube_file_2> -dens <density_cube_file_2>] -v`
 
 * -xyz: defines the fitted charge or multipoole model that we want to use to generate an ESP cube file
 * -multipole: specifies that we want to generate a multipolar ESP from a fitted multipole model instead of using a fitted charge model (optional)
