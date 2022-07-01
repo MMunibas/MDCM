@@ -159,7 +159,7 @@ ref_q_file = '' # file containing reference charge values (if using)
 
 def usage():
     print ("Usage: python3 fit.py -pot [potcube] -dens [denscube] [-lmax [lmax]]",\
-          "[-qtot [qtot]]")
+          "[-qtot [qtot]] [-fixq chargefile]")
 
 for i in range(len(sys.argv)):
   if sys.argv[i] == '-pot':

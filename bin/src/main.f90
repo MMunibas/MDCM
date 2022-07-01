@@ -727,7 +727,7 @@ if(use_greedy_fit) then
                 if(RMSE_tmp < multipole_solutions_rmse(num_charges,a)) then
                     if(verbose) write(*,'(A)') "NEW BEST!"                       
                     multipole_solutions_rmse(num_charges,a) = RMSE_tmp
-                    multipole_best(1,:) = multipole_solutions(:,num_charges,a)
+                    multipole_best(1,1:qdim) = multipole_solutions(1:qdim,num_charges,a)
                     MAE_tmp   = mae_qtot(multipole_solutions(1:qdim,num_charges,a))
                     maxAE_tmp = max_ae_qtot(multipole_solutions(1:qdim,num_charges,a))
                     ! write results to file        
@@ -771,7 +771,7 @@ if(use_greedy_fit) then
             end do
             
             !load the best solution
-            multipole_solutions(:,num_charges,a) = multipole_best(1,:)
+            multipole_solutions(1:qdim,num_charges,a) = multipole_best(1,1:qdim)
             
             !calculate the magnitude of the last charge
             multipole_solutions(qdim+1,num_charges,a) = 0._rp
