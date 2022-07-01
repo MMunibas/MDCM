@@ -91,7 +91,7 @@ Options:
 * -atom: define a comma-separated list of atom indices to be fitted without spaces (indices correspond to atom ordering in cube files). 
 * -ntry: set number of complete fitting runs. As the fitting code involves making random "mutations" to existing populations of candidate solutions, better results may be obtained by repeating the fitting process a few times and selecting the best result
 * -frames: if fitting to multiple conformers, reference axis frames must be defined (optional)
-* -converge: user-specified convergence criterion based on change in RMSE over time (optional)
+* -converge: user-specified convergence criterion (kcal/mol) based on change in RMSE over time (optional)
 * -gpu: use a GPU to evaluate the ESP (optional)
 * -v: verbose output (optional)
 
@@ -138,7 +138,7 @@ Options:
 * -sym: state that we want to apply symmetry constraints so that atomic charge models respect the molecular symmetry (optional)
 * -gpu: state that we want to run with CUDA support (optional)
 * -frames: if fitting to multiple conformers, reference axis frames must be defined (optional)
-* -converge: user-specified convergence criterion based on change in RMSE over time (optional)
+* -converge: user-specified convergence criterion (kcal/mol) based on change in RMSE over time (optional)
 * -simplex: use simplex refinement only and no DE to make large fitting problems tractable (optional)
 * -v: verbose output (optional)
 
