@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 
 import sys
+import os
 import numpy as np
+
+hartreetokcal = 627.509
 
 class GaussianCube():
     '''
@@ -117,23 +120,46 @@ class GaussianCube():
                     i += 1
         return grid_xyz, grid_val
 
+# read in charges from a previous fit to be frozen here
+def read_ref_charges(fname):
+  try:
+    with open(fname,'r') as fin:
+      for line in fin:
+        chgline = line.split() 
+        rank = chgline[0].split("(")
+        if len(rank) > 1:
+          if "0,0" in rank[1]:
+            fix_qs.append(float(chgline[1]))
+  except IOError as e:
+      print( "Reference charge file does not work: %s" % fname)
+      print( "File error ({0}): {1}".format(e.errno, e.strerror))
+      quit()
+  return fix_qs
+
+# subtract the ESP from frozen charges from the reference ESP
+def subtract_q_esp(lfix_qs,latoms_xyz,lgrid_xyz,lgrid_val):
+  for i in range(len(lfix_qs)):
+    for j in range(len(lgrid_val)):
+      r = lgrid_xyz[j] - latoms_xyz[i]
+      rmag = np.sqrt(r[0]**2+r[1]**2+r[2]**2) #no norm method for ndarray...
+      lgrid_val[j] = lgrid_val[j] - lfix_qs[i] / rmag
 
 lam  = 1e-6 #regularization term (keeps coefficients small), 0 for no regularization
-hartreetokcal = 627.509
 pot_cube_file = ''
 dens_cube_file = ''
 mtpl_file = "fitted-mtpl.dat"
 lmax = 5
 qtot = 0.0
-  
-f = open(mtpl_file,'w')  
+fixq = False # don't freeze the charges
+fix_qs = [] # to hold atomic charges to be frozen
+ref_q_file = '' # file containing reference charge values (if using)
 
 #############
 # Read command line input
 
 def usage():
     print ("Usage: python3 fit.py -pot [potcube] -dens [denscube] [-lmax [lmax]]",\
-          "[-qtot [qtot]]")
+          "[-qtot [qtot]] [-fixq chargefile]")
 
 for i in range(len(sys.argv)):
   if sys.argv[i] == '-pot':
@@ -144,6 +170,9 @@ for i in range(len(sys.argv)):
     lmax = int(sys.argv[i+1])
   elif sys.argv[i] == '-qtot':
     qtot = float(sys.argv[i+1])
+  elif sys.argv[i] == '-fixq': # freeze the charges to values read from a file
+    ref_q_file = sys.argv[i+1]
+    fixq = True
   elif sys.argv[i] == '-h':
     print("Usage: python fit.py -pun [file] [-par [parfile]] [-h]")
 
@@ -151,6 +180,18 @@ for i in range(len(sys.argv)):
 if pot_cube_file == '' or dens_cube_file == '':
   usage()
   raise Exception('Incorrect arguments to mtpfit.py') 
+
+#read reference charge file (in fitted-mtpl.dat format)
+if fixq:
+  fix_qs = read_ref_charges(ref_q_file)
+  if os.path.basename(ref_q_file) == mtpl_file:
+    mtpl_file = mtpl_file+".new"
+  if len(fix_qs) < 1:
+    raise Exception('No charges were read from file '+ref_q_file)
+  for i in range(len(fix_qs)):
+    print("chg"+str(i+1)+": "+str(fix_qs[i]))
+
+f = open(mtpl_file,'w')  
 
 #read cube files
 dens_cube = GaussianCube(dens_cube_file)
@@ -185,6 +226,10 @@ def extract_grid_vals(xyz, dens, esp, lower_bound=1.0e-3, upper_bound=3.16227766
     return xyz, esp
 
 grid_xyz, grid_val = extract_grid_vals(dens_xyz, dens_val, esp_val)
+
+#subtract frozen charge ESP from reference ESP grid
+if fixq:
+  subtract_q_esp(fix_qs,atoms_xyz,grid_xyz,grid_val)
 
 #gridsize
 Ngrid = grid_val.size
@@ -309,16 +354,28 @@ def multipole_esp(l, m, rvec):
         quit()
 
 #build design matrix
-A = np.zeros((Ngrid, Natom*L))
-for n in range(Ngrid):
-    i = 0
-    for l in range(lmax+1):
-        for a in range(Natom):
-            r = grid_xyz[n] - atoms_xyz[a]
-            for m in range(-l,l+1):
-                A[n,i] = multipole_esp(l, m, r)
-                i += 1
-
+if fixq: #case with fixed charges
+  L = L - 1 # remove Q00 terms
+  A = np.zeros((Ngrid, Natom*L))
+  for n in range(Ngrid):
+      i = 0
+      for l in range(1,lmax+1):
+          for a in range(Natom):
+              r = grid_xyz[n] - atoms_xyz[a]
+              for m in range(-l,l+1):
+                  A[n,i] = multipole_esp(l, m, r)
+                  i += 1
+else:
+  A = np.zeros((Ngrid, Natom*L))
+  for n in range(Ngrid):
+      i = 0
+      for l in range(lmax+1):
+          for a in range(Natom):
+              r = grid_xyz[n] - atoms_xyz[a]
+              for m in range(-l,l+1):
+                  A[n,i] = multipole_esp(l, m, r)
+                  i += 1
+  
 #build constraint matrix (so total charge is conserved)
 B = np.zeros((1,Natom*L))
 B[:,:Natom] = 1
@@ -362,8 +419,16 @@ def lse(A, b, B, d, lam=0.0):
         z = linalg.lstsq(A[:, p:].T.dot(A[:, p:]) + lam*np.eye(A[:,p:].shape[1]), A[:, p:].T.dot(b - np.dot(A[:, :p], y)))[0].ravel()
     return np.dot(Q[:, :p], y) + np.dot(Q[:, p:], z)
 
-
-x = lse(A, grid_val, B, d, lam)
+if not fixq:
+  x = lse(A, grid_val, B, d, lam)
+else:
+  from scipy import linalg
+  A, grid_val = map(np.asanyarray, (A, grid_val))
+  if lam == 0: #unregularized
+    x = linalg.lstsq(A,grid_val)[0].ravel()
+  else: #regularized
+    n_col = A.shape[1]
+    x = linalg.lstsq(A.T.dot(A) + lam * np.identity(n_col), A.T.dot(grid_val))[0].ravel()
 
 #write results to mtpl_file (passed as argument above)
 i = 0
@@ -373,13 +438,24 @@ maxmep = np.amax(np.absolute(grid_val)) * hartreetokcal
 meanabsmep = np.mean(np.absolute(grid_val)) * hartreetokcal
 print("Max MEP = "+str(maxmep)+"\n")
 print("Mean abs MEP = "+str(meanabsmep)+"\n")
-f.write("Qtot" + str(np.sum(x[:Natom])) + '\n')
+qtot=np.sum(x[:Natom])
+if fixq:
+  qtot=np.sum(fix_qs[:Natom])
+f.write("Qtot" + str(qtot) + '\n')
 f.write("# RMSE: " + str(rmse*hartreetokcal) + ", Max. Err: "+str(maxe*hartreetokcal)+" kcal/mol Qa(l,m) [a = atom index]\n")
 f.write(str(lmax) + '\n')
-for l in range(lmax+1):
+if not fixq:
+  for l in range(lmax+1):
     for a in range(Natom):
         for m in range(-l,l+1):
             f.write('Q'+str(a+1)+'('+str(l)+','+str(m)+')' + '     ' + str(x[i]) + '\n')
             i += 1
-
+else:
+  for a in range(Natom):
+    f.write('Q'+str(a+1)+'(0,0)'+'     ' + str(fix_qs[a])+ '\n')
+  for l in range(1,lmax+1):
+    for a in range(Natom):
+        for m in range(-l,l+1):
+            f.write('Q'+str(a+1)+'('+str(l)+','+str(m)+')' + '     ' + str(x[i]) + '\n')
+            i += 1
 

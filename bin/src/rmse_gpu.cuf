@@ -1,0 +1,82 @@
+module rmse_gpu 
+
+use cudafor
+
+integer, parameter, save :: gp = kind(0d0) 
+
+real, allocatable, dimension(:,:), save, device :: gridval_d
+real, allocatable, dimension(:), save, device :: esp_grid_d
+real, allocatable, dimension(:), save, device :: rmse_grid_d
+integer, save, device :: Ngrid_d
+integer,save :: gNgrid
+
+contains
+
+  subroutine gpu_set_ESPgrid(rgridval, resp_grid, rNgrid)
+    implicit none
+    
+    real(gp), dimension(:,:) :: rgridval
+    real(gp), dimension(:) :: resp_grid
+    integer :: rNgrid
+
+    Ngrid_d=rNgrid
+    gNgrid=rNgrid
+
+    if(allocated(gridval_d)) deallocate(gridval_d)
+    if(allocated(esp_grid_d)) deallocate(esp_grid_d)
+    if(allocated(esp_grid_d)) deallocate(rmse_grid_d)
+    allocate(gridval_d(3,rNgrid))
+    allocate(esp_grid_d(rNgrid))
+    allocate(rmse_grid_d(rNgrid))
+
+    gridval_d(:,1:rNgrid)=real(rgridval(:,1:rNgrid))
+    esp_grid_d(1:rNgrid)=real(resp_grid(1:rNgrid))
+    Ngrid_d=rNgrid
+
+  end subroutine gpu_set_ESPgrid
+
+  ! This subroutine will run on the CPU and call the GPU code
+  real function rmse_gpu(q)
+    use cudafor
+    implicit none
+    real(gp), dimension(:) :: q ! input charges
+    real, dimension(size(q,dim=1)), device :: q_d ! input charges
+    integer :: N
+    type(dim3) :: grid, tBlock
+
+    N = gNgrid !no. of ESP grid points
+    tBlock = dim3(256,1,1) !256 threads per block
+    grid = dim3(ceiling(real(N)/tBlock%x),1,1) !calculate required number of blocks
+
+    q_d(:) = real(q(:))
+    call coulomb_potential_rmse<<<grid, tBlock>>>(q_d)
+    rmse_gpu = sum(rmse_grid_d)
+    rmse_gpu = sqrt(rmse_gpu/N)
+
+  end function rmse_gpu
+
+! This subroutine will run on the GPU
+attributes(global)  &
+  subroutine coulomb_potential_rmse(q)
+    implicit none
+    real, dimension(:) :: q ! input charges
+    real, dimension(3) :: x ! grid point coords
+    real :: pot,r
+    integer :: i,j,n
+
+    pot=0.0
+    n = Ngrid_d
+    i = blockDim%x * (blockIdx%x - 1) + threadIdx%x
+    x(1:3) = gridval_d(:,i)
+    if (i <= n) then
+      do j=1,size(q,dim=1),4
+        r=sqrt(sum((q(j:j+2)-x)**2))  ! compute distance
+        if(r < 1.e-9) r = 1.e-9 ! prevent division by 0
+        pot = pot + q(j+3)/r
+      enddo
+      rmse_grid_d(i) = (pot - esp_grid_d(i))**2
+    endif
+  end subroutine coulomb_potential_rmse
+
+end module rmse_gpu
+

@@ -241,8 +241,8 @@ end enum
 integer,  save :: mutationStrategy = DErand1 ! mutation strategy
 integer,  save :: maxGens          = 1000      ! maximum generations
 integer,  save :: maxChilds        = 5         ! maximum children
-integer,  save :: dim              = 0         ! dimensionality
-integer,  save :: popSize          = 0         ! population size        >=4,  at least [2*dim,3*dim]
+integer,  save :: dime             = 0         ! dimensionality
+integer,  save :: popSize          = 0         ! population size        >=4,  at least [2*dime,3*dime]
 real(rp), save :: diffWeight       = 0.99_rp   ! standard differential weight [0,2], usually 1 
 real(rp), save :: crossProb        = 0.50_rp   ! crossover probability [0,1], usually  [0.25,0.75]
 real(rp), save :: diversity        = 0.55_rp   ! diversity parameter, starts at 0.55 
@@ -274,14 +274,13 @@ subroutine DE_init(set_range, set_popSize, set_crossProb, set_diffWeight, set_ma
     logical,  intent(in), optional       :: set_forceRange
     logical,  intent(in), optional       :: set_verbose
     integer,  intent(in), optional       :: set_Nprint
-    integer :: i
     
     if(size(set_range, dim=1) /= 2) &
         call DE_error("DE_init",&
-             "set_range must be of dimensions (2,dim)!")
+             "set_range must be of dimensions (2,dime)!")
              
     !read dimensionality
-    dim = size(set_range, dim=2)
+    dime = size(set_range, dim=2)
         
     !read optional arguments
     if(present(set_mutationStrategy)) then
@@ -308,7 +307,7 @@ subroutine DE_init(set_range, set_popSize, set_crossProb, set_diffWeight, set_ma
             popSize = 4
         end if
     else
-        popSize = 5*dim
+        popSize = 5*dime
     end if
     
     if(present(set_crossProb)) then
@@ -372,10 +371,9 @@ subroutine DE_init(set_range, set_popSize, set_crossProb, set_diffWeight, set_ma
     !$ if(verbose) write(*,'(A,I0,A)') "Running DE in parallel with ",numThreads," thread(s)!"
     !$ if(verbose) write(*,*)
     
-    
   ! allocate memory for variables
-    if(.not.allocated(pop))          allocate(pop(dim,popSize))
-    if(.not.allocated(popnew))       allocate(popnew(dim,popSize))
+    if(.not.allocated(pop))          allocate(pop(dime,popSize))
+    if(.not.allocated(popnew))       allocate(popnew(dime,popSize))
 
     if(.not.allocated(fpop))         allocate(fpop(popSize))
     if(.not.allocated(fpopnew))      allocate(fpopnew(popSize))
@@ -387,7 +385,7 @@ subroutine DE_init(set_range, set_popSize, set_crossProb, set_diffWeight, set_ma
     if(.not.allocated(constrpopnew)) allocate(constrpopnew(popSize))
 
     
-    if(.not.allocated(range))     allocate(range(2,dim))
+    if(.not.allocated(range))     allocate(range(2,dime))
     if(.not.allocated(rng))       allocate(rng(0:numThreads-1))
     
     range = set_range
@@ -406,9 +404,9 @@ subroutine DE_exit()
     if(allocated(rng))          deallocate(rng)
 end subroutine DE_exit
 
-subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
+subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop,dcut)
     implicit none
-    real(rp), dimension(:), intent(out) :: x
+    real(rp), dimension(:) :: x
     real(rp), dimension(size(x, dim=1)), intent(in), optional :: guess
     interface
         real*8 function func(y)
@@ -433,22 +431,36 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
     end interface 
     optional :: init_pop
     
-    real(rp), dimension(dim,4) :: m  !randomly selected individuals
+!    real(rp), dimension(dime,4) :: m  !randomly selected individuals
+    real(rp), dimension(:,:), allocatable :: m  !randomly selected individuals
     real(rp), dimension(4)     :: fm !and their function values
-    real(rp), dimension(size(x,dim=1)) :: child, mutant, v
-    real(rp), parameter :: eps = 1.e-12_rp
+!    real(rp), dimension(size(x,dim=1)) :: child, mutant
+    real(rp), dimension(:), allocatable :: child, mutant
+!    real(rp), parameter :: eps = 1.e-12_rp
+    real(rp), parameter :: eps = 1.e-9_rp
+    real(rp) :: dcut,fpop_old !optional convergence cutoff for accelerated fitting
     real(rp) :: ranr, f, constr, popSizer, fbestlast
-    integer :: j, gen, p, d, c, rani, bestindx, dum, mutVar, bestlast
+    integer :: gen, p, d, c, i, rani, bestindx, dum, mutVar, bestlast, t
 
-    logical :: converged, fsble, booldummy
-    
+    logical :: converged, fsble 
+    !# $omp threadprivate(m,child,mutant)
+
+    allocate(m(dime,4))
+    allocate(child(size(x,dim=1)))
+    allocate(mutant(size(x,dim=1)))
+
     converged = .false.
     popSizer = real(popSize,rp) ! popSize as real
     constrpop = 0._rp
     gen = 0    
-    
+    m=0.d0
+    child=0.d0
+    mutant=0.d0
+
     !$omp parallel num_threads(numThreads)    
-    !$myID = omp_get_thread_num()
+#if defined(_OPENMP)
+    myID=omp_get_thread_num()
+#endif
     !$omp end parallel
     
     ! initialize random number generator
@@ -463,7 +475,9 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
         if(present(guess)) then
             pop(:,1) = guess
         end if
-        !$omp parallel do default(shared) private(p) num_threads(numThreads)
+        !$omp parallel do default(private)  &
+        !$omp shared(fpop,fsblepop,constrpop,popsize,pop) &
+        !$omp num_threads(numThreads)
         do p = 1,popSize
             fpop(p) = func(pop(:,p))
             fsblepop(p) = feasible(pop(:,p))
@@ -477,7 +491,7 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
         if(.not.fsblepop(1)) constrpop(1) = sumconstr(pop(:,1))
         !$omp parallel do default(shared) private(p,d) num_threads(numThreads) 
         do p = 2,popSize
-            do d = 1,dim
+            do d = 1,dime
                 pop(d,p) = 1._rp + (2._rp*draw_uniform(rng(myID))-1._rp) * real(p,rp)/real(popSize,rp)
                 if(abs(pop(d,1)) > epsilon(0._rp)) then
                     pop(d,p) = pop(d,1)*pop(d,p)
@@ -494,7 +508,7 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
         !$omp parallel do default(shared) private(p,d) num_threads(numThreads)   
         do p = 1,popSize
             !print*, "Iteration", i, " is executed by", myID
-            do d = 1,dim
+            do d = 1,dime
                 pop(d,p) = range(1,d) + draw_uniform(rng(myID))*(range(2,d)-range(1,d))
             end do
             fpop(p) = func(pop(:,p))
@@ -531,6 +545,7 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
         if(verbose.and.modulo(gen,Nprint) == 0) then
             write(*,'(A4,I6,A1,I0,5X,A9,ES14.7,A,L)') "gen ", gen, "/", maxGens,&
                      " elitist ", fpop(bestindx), " feasible? ", fsblepop(bestindx)
+            flush(6)
         end if
         
         ! decrease diversity parameter => focus search more on feasible region
@@ -539,10 +554,19 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
         else
             diversity = 0.025_rp ! minimum diversity
         end if
-  
+ 
+        !# $omp parallel default(shared) &
+        !# $omp private(fm,p,d,c,rani,ranr,f,fsble,constr) copyin(m,child,mutant) &
+
+        !# $omp shared(DErand1,DErand2,DEbest1,DEbest2
+
         ! loop over the generation                     
-        !$omp parallel do default(shared) private(mutant,child,booldummy,dum,m,p,d,c,rani,ranr,f,fsble,constr), &
-        !$omp& num_threads(numThreads) 
+        !$omp parallel default(private) &
+        !$omp shared(pop,fpop,popSize,maxChilds,dime,mutVar,popnew,fpopnew, &
+        !$omp fsblepopnew,constrpopnew,crossProb,diffWeight, &
+        !$omp forceRange,rng,mutationStrategy,bestindx) &
+        !$omp num_threads(numThreads) 
+        !$omp do
         do p = 1,popSize
             do c = 1,maxChilds 
                 ! draw dum random individuals from the population using reservoir sampling
@@ -564,9 +588,9 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
                 end do
 
                 !do crossover (not used, its always better to mutate everything for charges)
-                rani = ceiling(draw_uniform(rng(myID))*dim) !randomly chosen integer guaranteed to mutate
+                rani = ceiling(draw_uniform(rng(myID))*dime) !randomly chosen integer guaranteed to mutate
                 
-                do d = 1,dim
+                do d = 1,dime
                     ranr = draw_uniform(rng(myID)) !draw random number
                     if((ranr < crossProb .or. d == rani)) then
                         ! DE/rand/1
@@ -615,7 +639,7 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
                 if(c > 1) then
                     call compare_solutions(func,feasible,sumconstr,mutant,f,fsble,constr,child)     
                 else
-                    mutant      = child
+                    mutant(:)   = child(:)
                     f           = func(mutant)
                     fsble       = feasible(mutant)
                     constr      = sumconstr(mutant)
@@ -637,7 +661,8 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
             end if     
 
         end do
-        !$omp end parallel do  
+        !$omp end do
+        !$omp end parallel 
         !load new solutions
         pop       = popnew
         fpop      = fpopnew
@@ -651,9 +676,21 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop)
         bestindx = find_best()
             
         ! check for convergence via cost function diversity check
-        if(sum(sqrt((fpop-fpop(bestindx))**2))/popSizer < eps) then
+        if(sqrt(sum((fpop-fpop(bestindx))**2)/popSizer) < eps) then
             converged = .true.
             if(verbose) write(*,'(A,I0,A)') "population converged towards a single solution after ", gen," generations."
+        end if
+
+        ! optionally check for convergence based purely on cost function improvement over
+        ! last 1000 generations (1000 is a hardcoded, arbitrary parameter)
+        if(gen.eq.1) fpop_old=fpop(bestindx)
+        if(dcut.ne.0.d0.and.modulo(gen,1000) == 0) then
+          if(abs(fpop_old-fpop(bestindx)).gt.abs(dcut))then
+            fpop_old=fpop(bestindx)
+          else
+            converged = .true.
+            if(verbose) write(*,'(A,I0,A)') "user-defined convergence criteria met after ", gen," generations."
+          endif
         end if
     end do
     ! store the best solution as return value
@@ -793,7 +830,8 @@ subroutine DE_simplex(func,feasible,sol) !local optimization to refine solution
     real(rp) :: fr, fe, fc, conv, ran, tmp
 
     logical,  dimension(size(sol,dim=1)+1) :: mask ! for finding second worst solution
-    real(rp), parameter :: eps = 1d-12 ! convergence criterion
+!    real(rp), parameter :: eps = 1d-12 ! convergence criterion
+    real(rp), parameter :: eps = 1d-9 ! convergence criterion
     real(rp), parameter :: unfeasible_penalty = 1e2_rp ! penalty for unfeasible solutions
     integer :: i, j, k, Ndim
     real(rp) :: Ndimr
