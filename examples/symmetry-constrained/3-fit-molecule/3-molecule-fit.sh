@@ -8,7 +8,7 @@
 # Note: adapt the Slurm script below to whatever cluster environment you're using
 
 # FOLDERS
-ROOTDIR=/home/devereux/MDCM-release/examples/benzene-sym
+ROOTDIR=/home/devereux/MDCM-release/examples/symmetry-constrained
 WORKDIR=$ROOTDIR/3-fit-molecule
 BINDIR=/home/devereux/MDCM-release/bin
 REFDIR=$ROOTDIR/../ref

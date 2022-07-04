@@ -4,7 +4,7 @@
 # the reference ESP 
 
 # FOLDERS
-ROOTDIR=/home/devereux/MDCM-release/examples/benzene-sym
+ROOTDIR=/home/devereux/MDCM-release/examples/symmetry-constrained
 WORKDIR=$ROOTDIR/4-analysis
 BINDIR=/home/devereux/MDCM-release/bin
 REFDIR=$ROOTDIR/../ref

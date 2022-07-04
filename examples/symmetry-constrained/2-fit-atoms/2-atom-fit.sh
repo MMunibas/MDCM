@@ -11,7 +11,7 @@
 # Note: adapt the Slurm script below to whatever cluster you're using...
 
 # FOLDERS
-ROOT=/home/devereux/MDCM-release/examples/benzene-sym
+ROOT=/home/devereux/MDCM-release/examples/symmetry-constrained
 WORKDIR=$ROOT/2-fit-atoms
 BINDIR=/home/devereux/MDCM-release/bin
 REFDIR=$ROOT/../ref

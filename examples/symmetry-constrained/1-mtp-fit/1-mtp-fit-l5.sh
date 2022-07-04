@@ -10,7 +10,7 @@
 # from our original cube file at different distances from the nuclei
 
 # FOLDERS
-ROOT=/home/devereux/MDCM-release/examples/benzene-sym
+ROOT=/home/devereux/MDCM-release/examples/symmetry-constrained
 WORKDIR=$ROOT/1-mtp-fit
 BINDIR=/home/devereux/MDCM-release/bin
 REFDIR=$ROOT/../ref
