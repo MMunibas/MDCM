@@ -12,7 +12,7 @@
 # Note: adapt the Slurm script below to whatever cluster environment you're using
 
 # FOLDERS
-ROOTDIR=/home/devereux/MDCM-release/examples/basic_fit
+ROOTDIR=/home/devereux/MDCM-release/examples/basic-fit
 WORKDIR=$ROOTDIR/3-fit-molecule
 BINDIR=$ROOTDIR/../../bin
 REFDIR=$ROOTDIR/../ref

@@ -13,7 +13,7 @@
 #
 
 # FOLDERS
-ROOTDIR=/home/devereux/MDCM-release/examples/basic_fit
+ROOTDIR=/home/devereux/MDCM-release/examples/basic-fit
 WORKDIR=$ROOTDIR/5-charmm-files
 BINDIR=/home/devereux/MDCM-release/bin
 REFDIR=$ROOTDIR/../ref

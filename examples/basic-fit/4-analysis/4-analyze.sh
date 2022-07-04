@@ -6,7 +6,7 @@
 # computation.
 
 # FOLDERS
-ROOTDIR=/home/devereux/MDCM-release/examples/basic_fit
+ROOTDIR=/home/devereux/MDCM-release/examples/basic-fit
 WORKDIR=$ROOTDIR/4-analysis
 BINDIR=/home/devereux/MDCM-release/bin
 REFDIR=$ROOTDIR/../ref

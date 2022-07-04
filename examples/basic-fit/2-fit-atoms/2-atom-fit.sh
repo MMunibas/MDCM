@@ -8,7 +8,7 @@
 # Note: adapt the Slurm script below to whatever cluster you're using...
 
 # FOLDERS
-ROOT=/home/devereux/MDCM-release/examples/basic_fit
+ROOT=/home/devereux/MDCM-release/examples/basic-fit
 WORKDIR=$ROOT/2-fit-atoms
 BINDIR=$ROOT/../../bin
 REFDIR=$ROOT/../ref

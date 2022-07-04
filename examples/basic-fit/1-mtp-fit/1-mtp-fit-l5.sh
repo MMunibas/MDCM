@@ -10,7 +10,7 @@
 # the quality of the fit
 
 # FOLDERS
-ROOT=/home/devereux/MDCM-release/examples/basic_fit
+ROOT=/home/devereux/MDCM-release/examples/basic-fit
 WORKDIR=$ROOT/1-mtp-fit
 BINDIR=$ROOT/../../bin
 REFDIR=$ROOT/../ref
