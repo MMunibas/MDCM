@@ -8,14 +8,14 @@
 # Note: adapt the Slurm script below to whatever cluster environment you're using
 
 # FOLDERS
-ROOTDIR=/pchem-data/meuwly/devereux/MDCM/examples/benzene-sym
-WORKDIR=$ROOTDIR/4-fit-molecule
-BINDIR=/pchem-data/meuwly/devereux/MDCM/bin
-REFDIR=$ROOTDIR/ref
-ATOMDIR=$ROOTDIR/3-fit-atoms
+ROOTDIR=/home/devereux/MDCM-release/examples/benzene-sym
+WORKDIR=$ROOTDIR/3-fit-molecule
+BINDIR=/home/devereux/MDCM-release/bin
+REFDIR=$ROOTDIR/../ref
+ATOMDIR=$ROOTDIR/2-fit-atoms
 # INPUT
-MTPFILE=$ROOTDIR/2-mtp-fit/fitted-mtpl-l5.dat # from step 2
-PCUBE=$REFDIR/benzene-pot.cube # again, not really used for fragments
+MTPFILE=$ROOTDIR/1-mtp-fit/fitted-mtpl.dat # from step 2
+PCUBE=$REFDIR/benzene-pot.cube 
 DCUBE=$REFDIR/benzene-dens.cube
 # FITTING PARAMETERS
 NFIT=5       # number of separate fits to perform for each fragment (should not exceed atom fits)
@@ -39,10 +39,8 @@ for ((j=1; j<=$NFIT; j++)); do
 
 #SBATCH --job-name=frag${i}fit${j}q${k}
 #SBATCH --nodes=1
-#SBATCH --ntasks=4
-#SBATCH --partition=gpu
-#SBATCH --gres=gpu:1
-#SBATCH --constraint=RTX2080Ti
+#SBATCH --ntasks=8
+#SBATCH --partition=long
 
 WORKDIR=$WORKDIR
 BINDIR=$BINDIR
@@ -59,9 +57,7 @@ cd $WORKDIR/fit$j
 echo frag${i}fit${j}q${k}
 hostname
 
-module load gcc/gcc-7.4.0-openmpi-3.1.4-cuda-for-11.4
-
-\$BINDIR/cudacubefit.x -greedy \$MTPFILE -esp \$PCUBE -dens \$DCUBE -ncmin \$MINCHG -ncmax \$MAXCHG -nacmax 4 -ntry \$NTRY -sym -v -gpu > \$NAME".out"
+\$BINDIR/pcubefit.x -greedy -mtpfile \$MTPFILE -esp \$PCUBE -dens \$DCUBE -ncmin \$MINCHG -ncmax \$MAXCHG -nacmax 4 -ntry \$NTRY -sym -v > \$NAME".out"
 " > $SCRIPT
 
     sbatch $SCRIPT
