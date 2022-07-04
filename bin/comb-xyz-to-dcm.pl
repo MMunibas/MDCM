@@ -83,7 +83,8 @@ for(my $i=0; $i<$nq; $i++){
 }
 
 # get local axis frames in molecule
-my @fr;
+my @fr; #holds frame definitions
+my @frtyp; #holds frame type (bond or bisector axis system)
 my $nf=0;
 my $resn;
 $line=1;
@@ -95,10 +96,11 @@ while(<FRA>){
 
   if($line==1){ $resn=$a[0]; }
 
-  if(@a+0==3){
+  if(@a+0==4){
     $fr[$nf][0]=$a[0]-1;
     $fr[$nf][1]=$a[1]-1;
-    $fr[$nf++][2]=$a[2]-1;
+    $fr[$nf][2]=$a[2]-1;
+    $frtyp[$nf++]=uc($a[3]);
   }
   $line++;
 
@@ -114,7 +116,7 @@ for(my $n=0; $n<$nf; $n++){
  my $a1=$fr[$n][0];
  my $a2=$fr[$n][1];
  my $a3=$fr[$n][2];
- print OUT " ",$a1+1,"  ",$a2+1,"  ",$a3+1," BO  ! atom indices involved in frame  1\n";
+ print OUT " ",$a1+1,"  ",$a2+1,"  ",$a3+1," $frtyp[$n]  ! atom indices involved in frame  1\n";
 
  my $b1x=$coords[$a1][0]-$coords[$a2][0];
  my $b1y=$coords[$a1][1]-$coords[$a2][1];
@@ -149,13 +151,24 @@ for(my $n=0; $n<$nf; $n++){
  $ez1[1]=$b1y;
  $ez1[2]=$b1z;
 
- $ez2[0]=$b1x;
- $ez2[1]=$b1y;
- $ez2[2]=$b1z;
-
  $ez3[0]=$b2x;
  $ez3[1]=$b2y;
  $ez3[2]=$b2z;
+ if($frtyp[$n] eq "BO"){
+  $ez2[0]=$b1x;
+  $ez2[1]=$b1y;
+  $ez2[2]=$b1z;
+ }elsif($frtyp[$n] eq "BI"){
+  $ez2[0]=$b1x+$b2x;
+  $ez2[1]=$b1y+$b2y;
+  $ez2[2]=$b1z+$b2z;
+  my $rbi=sqrt($ez2[0]**2+$ez2[1]**2+$ez2[2]**2);
+  $ez2[0]=$ez2[0]/$rbi;
+  $ez2[1]=$ez2[1]/$rbi;
+  $ez2[2]=$ez2[2]/$rbi;
+ }else{
+  die "Unrecognized axis system type $frtyp[$n]. Must be BO or BI\n";
+ }
 
 # y-axes:
  $ey1[0]=$b1y*$b2z-$b1z*$b2y;
@@ -165,7 +178,6 @@ for(my $n=0; $n<$nf; $n++){
  $ey1[0]/=$rey;
  $ey1[1]/=$rey;
  $ey1[2]/=$rey;
-
 
  $ey2[0]=$ey1[0];
  $ey2[1]=$ey1[1];
@@ -184,9 +196,13 @@ for(my $n=0; $n<$nf; $n++){
  $ex1[1]/=$rex;
  $ex1[2]/=$rex;
 
- $ex2[0]=$ex1[0];
- $ex2[1]=$ex1[1];
- $ex2[2]=$ex1[2];
+ $ex2[0]=$ez2[1]*$ey2[2]-$ez2[2]*$ey2[1];
+ $ex2[1]=$ez2[2]*$ey2[0]-$ez2[0]*$ey2[2];
+ $ex2[2]=$ez2[0]*$ey2[1]-$ez2[1]*$ey2[0];
+ $rex=sqrt($ex2[0]**2+$ex2[1]**2+$ex2[2]**2);
+ $ex2[0]/=$rex;
+ $ex2[1]/=$rex;
+ $ex2[2]/=$rex;
 
  $ex3[0]=$b2y*$ey1[2]-$b2z*$ey1[1];
  $ex3[1]=$b2z*$ey1[0]-$b2x*$ey1[2];
