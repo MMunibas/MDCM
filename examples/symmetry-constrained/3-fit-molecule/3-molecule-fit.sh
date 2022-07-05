@@ -21,8 +21,8 @@ DCUBE=$REFDIR/benzene-dens.cube
 NFIT=5       # number of separate fits to perform for each fragment (should not exceed atom fits)
 NTRY=4        # number of tries for each fit
 MAXATMCHG=4   # max charges per atom used in atom fits
-MINMOLCHG=12   # smallest number of charges to fit for fragment
-MAXMOLCHG=36 # largest number of charges to fit for fragment
+MINMOLCHG=12   # smallest number of charges to fit for molecule
+MAXMOLCHG=36 # largest number of charges to fit for molecule
 
 cd $WORKDIR
 
