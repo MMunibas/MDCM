@@ -1,0 +1,23 @@
+Example "Basic Fit" (Mike Devereux)
+
+This example shows the basic fitting procedure using standard MDCM
+functionality with no additional options. The procedure is as follows:
+
+1. Fit atomic multipoles to the reference ESP (least-squares)
+2. Fit a separate charge model for each atom using the atomic multipoles to
+define an atomic ESP (differential evolution, simplex refinement)
+3. Combine the atomic charge models to create a starting population for
+molecular fitting, and fit a molecular charge model to the reference ESP
+(differential evolution, simplex refinement)
+4. Use the fitted model to generate an ESP grid that can be compared to the
+original reference ESP, in order to assess the quality of the fit
+5. Convert the charge model to CHARMM .dcm format for use in running molecular
+dynamics simulations
+
+Note that an exhaustive procedure is used to identify the model with the best
+compromise between number of charges and RMSE in the ESP. To this end each
+atomic and molecular charge fit with a given number of charges is run several
+times to provide the model with lowest RMSE. In additional, several separate
+fits are run for each number of charges. The result is that a truly "minimal"
+model can be selected, that uses as few charges as possible to attain the
+desired level of accuracy.

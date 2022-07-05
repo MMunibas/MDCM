@@ -1,0 +1,24 @@
+Example "Symmetry Constrained" (Mike Devereux)
+
+This example shows how symmetry constraints can be introduced during MDCM
+fitting. The procedure is as follows:
+
+1. Fit atomic multipoles to the reference ESP without applying symmetry
+constraints (least-squares)
+2. Fit a separate charge model for each group of symmetrically equivalent atoms,
+i.e. for one atom of each group of atoms that are considered equivalent due to
+symmetry (differential evolution, simplex refinement)
+3. Combine the atomic charge models to create a starting population for
+molecular fitting, and fit a symmetry-constrained molecular charge model by
+fitting one charge from each symmetry environment and transforming its position
+to the other symmetry-equivalent atoms, and by constraining each charge to
+respect the local atomic symmetry environment (differential evolution, simplex
+refinement)
+4. Use the fitted model to generate an ESP grid that can be compared to the
+original reference ESP, in order to assess the quality of the fit
+
+Note that an exhaustive procedure is again used to identify the model with the
+best compromise between number of charges and RMSE in the ESP, but this time, in
+order to respect molecular symmetry, some combinations are not possible. For
+example, in benzene molecular symmetry can be maintainted with 6 or 12 charges,
+but there is no way to maintain C6 symmetry using 5 charges.
