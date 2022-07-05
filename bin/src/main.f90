@@ -553,19 +553,14 @@ if(use_greedy_fit) then
     if(.not.allocated(multipole_best))            allocate( &
        multipole_best(Nconf,num_charges_max_multipole*4))
 
-    !read in multipole data
-    if(Nconf .ne. Nmtp) then
-      call throw_error('For atom fitting there must be one'//&
-          ' mtp file for each conformer')
-    end if
     ! don't run atom fits to multiple conformers...      
     if(Nconf>1) then
-!      call throw_error('Sorry, atom fitting is not yet implemented for multiple conformers')
       write(*,*) 'Warning: atom fitting uses only 1 conformer. Subsequent fragment fits will use all available conformers'
     end if
-    tNconf=Nconf
+    tNconf=Nconf ! save no. of conformers, we use only 1 to fit atoms
     Nconf=1
 
+    !read in multipole data
     call read_multipole_file(input_multipolefile(1),1)
 
     ! allocate memory
@@ -624,11 +619,12 @@ if(use_greedy_fit) then
                 !calculate the RMSE of the loaded solution
                 multipole_solutions_rmse(num_charges,a) = sym_atm_rmse_qtot( &
                                   multipole_solutions(1:sqdim,num_charges,a))
-                !print*, multipole_solutions_rmse(num_charges,a)
                 if(verbose) then
                     write(*,'(A)') 'File "'//trim(dummystring)//'" already exists.'//&
                                                    " Fitting procedure is skipped."
-  
+                    write(*,'(A,I0,A,F6.3,A)') 'RMSE read for atom ',a,' is ',&
+                         multipole_solutions_rmse(num_charges,a)*hartree2kcal,&
+                         ' kcal/mol'
                 end if
                 cycle
               endif
@@ -667,7 +663,12 @@ if(use_greedy_fit) then
                                                    
                 end if  
                 cycle
-            end if        
+            end if
+            ! if we're rally running an atom fit, check we have enough mtp files
+            if(Nconf .ne. Nmtp) then
+              call throw_error('For atom fitting there must be one'//&
+                 ' mtp file for each conformer')
+            end if
           
             ! initialize RMSE    
             multipole_solutions_rmse(num_charges,a) = vbig
@@ -1712,7 +1713,7 @@ subroutine read_axis_frames()
 
     if(verbose) write(*,'(A)') 'Read frames:'
     do i=1,Nframes
-      write(*,'(3I4)'),tframes(i,1:3)
+      write(*,'(3I4)') tframes(i,1:3)
       frames(i,1:3) = tframes(i,1:3)
       if(tframetypes(i).eq.'BO'.or.tframetypes(i).eq.'bo')then
         if(verbose) write(*,'(A,I0)') ' Using bond-type local axes for frame ',i

@@ -1,0 +1,37 @@
+Example "Multi-Conformer" (Mike Devereux)
+
+This example shows the fitting procedure to fit a single, static MDCM to more
+than one ESP grid in order to fit to more than conformer. Note that this is
+considered best practise, as models fitted to a single conformer only may be
+very finely balanced and sensitive to conformational change. Explicitly
+including more than one conformer excludes such solutions during fitting without
+greatly impacting the ESP RMSE of the fitted models.
+
+The procedure is:
+
+1. Fit atomic multipoles to a single reference ESP (least-squares)
+2. Fit a separate charge model for each atom using the atomic multipoles to
+define an atomic ESP, again for a single conformer (differential evolution,
+simplex refinement)
+3. Combine the atomic charge models to create a starting population for
+molecular fitting, and fit a molecular charge model to the reference ESP
+of all grids simultaneously (differential evolution, simplex refinement)
+4. Use the fitted model to generate an ESP grid that can be compared to the
+reference ESP of each conformer, in order to assess the quality of the fit
+
+Note that again an exhaustive procedure is used to identify the model with the
+best compromise between number of charges and RMSE in the ESP over all
+conformers.
+
+Unlike for single-conformer fitting, it is necessary to define the molecular
+frames used to define charge positions relative to nuclear coordinates. This is
+needed to perform the conformational change, as charge positions need to be
+transformed for each new conformation.
+
+Note that here it is not necessary to fit multipoles and atomic charges to
+multiple conformers, as they are only needed to perform a rough initial guess
+for subsequent molecular fitting. In other examples this may not be the case,
+for example when fitting fragments as here the multipoles are also required to
+fit the fragments in different conformations. In that case the charges should
+also be fixed to be the same for each conformer during multipole fitting, so
+that total fragment charge is consistent for different conformers.
