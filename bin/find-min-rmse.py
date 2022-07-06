@@ -6,23 +6,22 @@ import sys
 import os
 
 def usage():
-	print("Usage: python3 find-min-rmse.py <ROOT> <BINDIR> <FRAGDIR> <WORKDIR> <NFRAGS> <NFIT> <MINCHGS> <MAXCHGS> <MINFRAGCHGS> <MAXFRAGCHGS>")
+	print("Usage: python3 find-min-rmse.py <BINDIR> <FRAGDIR> <WORKDIR> <NFRAGS> <NFIT> <MINCHGS> <MAXCHGS> <MINFRAGCHGS> <MAXFRAGCHGS>")
 
 
-if len(sys.argv) < 11:
+if len(sys.argv) < 10:
 	usage()
 	exit()
 
-ROOT = str(sys.argv[1])
-BINDIR = str(sys.argv[2])
-FRAGDIR = str(sys.argv[3])
-WORKDIR = str(sys.argv[4])
-nfrag = int(sys.argv[5])
-nfit = int(sys.argv[6])
-minchgs = int(sys.argv[7])
-maxchgs = int(sys.argv[8]) + 1
-minfragchgs = int(sys.argv[9])
-maxfragchgs = int(sys.argv[10])
+BINDIR = str(sys.argv[1])
+FRAGDIR = str(sys.argv[2])
+WORKDIR = str(sys.argv[3])
+nfrag = int(sys.argv[4])
+nfit = int(sys.argv[5])
+minchgs = int(sys.argv[6])
+maxchgs = int(sys.argv[7]) + 1
+minfragchgs = int(sys.argv[8])
+maxfragchgs = int(sys.argv[9])
 
 
 
@@ -31,7 +30,7 @@ def read_rmse(nfrag, nfit, minfragchgs, maxfragchgs):
 	for ifrag in range(0, nfrag):
 		for ifit in range(0, nfit):
 			for ichgs in range(0, maxfragchgs+1 - minfragchgs):
-				xyzfile = ROOT + "/4-fit-frags/frag" + str(ifrag+1) + "/fit" + str(ifit+1) + "/" + str(ichgs+minfragchgs) + "charges.xyz"
+				xyzfile = FRAGDIR + "/frag" + str(ifrag+1) + "/fit" + str(ifit+1) + "/" + str(ichgs+minfragchgs) + "charges.xyz"
 				#print(xyzfile)
 				try:
 					with open(xyzfile, 'r') as file:

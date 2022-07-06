@@ -1,0 +1,31 @@
+Example "Fragment Fit" (Mike Devereux)
+
+This example shows how molecular fitting problems can be broken down with an
+intermediate fragment-fitting step. The approach allows an MDCM to be fitted for
+large systems with many charges, where a global fit with differential evolution
+would be too slow.
+
+Note that symmetry-constrained fitting would be more appropriate for the 
+benzene molecule considered here, this example is meant for ilustrative purposes
+only.
+
+The procedure is:
+
+1. Fit atomic multipoles to the reference ESP (least-squares)
+2. Fit a separate charge model for each atom to the multipolar atomic ESP
+(differential evolution, simplex refinement)
+3. Combine the atomic charge models to create a starting population for fragment
+fitting, and fit fragment charge models to the fragment ESP, as defined by the
+fitted multipoles (differential evolution, simplex refinement)
+4. Combine the fragment models in such a way as to minimize the total molecular
+RMSE of the ESP (based on different permutations of fragment models).
+5. Refine the molecular model, for manageable systems using differential 
+evloution or for large systems using simplex optimization only. One example of
+each approach is given, differential evolution is considerably slower with
+typically only a modest improvement for the refinement step.
+6. Use the fitted model to generate an ESP grid that can be compared to the
+original reference ESP, in order to assess the quality of the fit
+
+An exhaustive procedure is again used to identify the model with the
+best compromise between number of charges and RMSE in the ESP, with several
+fits performed to increase the chances of finding a near-optimal solution.
