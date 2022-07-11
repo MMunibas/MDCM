@@ -1,0 +1,106 @@
+* trialanine in waterbox for comparison with DCM routines
+*
+
+bomlev -1
+prnlev 4 node 0
+
+open unit 30 card read name par/top_all36_prot.rtf
+read rtf card unit 30
+close unit 30
+
+open unit 31 card read name par/par_all36_prot.prm
+read para card flex unit 31
+close unit 31
+
+stream par/toppar_water_ions.str
+
+READ SEQUENCE CARD
+* neutral tryptophan
+*
+ 1
+TRP 
+
+GENERATE LIG FIRST CNEU LAST NNEU ANGLEs DIHEdrals SETUP
+
+SCALAR CHARGE SHOW
+
+! generate initial coordinates
+IC GENErate 
+IC PARAM
+IC SEED LIG 1 CB LIG 1 CG LIG 1 CD1
+IC BUILD
+
+!set nonbonding parameters
+
+nbond nbxmod 5 atom cdie eps 1.0 -
+  cutnb 14.0 cutim 14.0 ctofnb 12.0 ctonnb 10.0 -
+  vswitch vatom vdist e14f 1.0
+
+update
+
+!cons fix sele .not. ((segid WAT)) end
+shake bonh para tol 1.0e-8
+
+energy
+
+
+MINImize SD nstep 500 nprint 10 inbfrq -1 ihbfrq 0
+
+open unit 1 write card name mini.crd
+write coor card unit 1
+close unit 1
+
+open write unit 10 card name mini.pdb
+write coor unit 10 pdb
+close unit 10
+
+
+OPEN WRITE UNIT 31 CARD NAME heat.res      ! Restart file
+OPEN WRITE UNIT 32 FILE NAME heat.dcd      ! Coordinates file
+
+DYNA STRT VERL NSTE 25000 TIME 0.001 inbfrq 10 IMGFRQ 10 -
+   IPRFRQ 100 IHTFRQ 1000 IEQFRQ 0  IHBFRQ 0 NTRFRQ 100 -
+   IUNREA -1 IUNWRI 31 IUNCRD 32 IUNVEL -1 -
+   NPRINT 1000 ISEED 888277364 7132478 45762345 2343452 nsavc 100 -
+   FIRSTT 100.0 FINALT 300.0 TEMINC 10.0 -
+   TWINDH 10.0 TWINDL -10.0 -
+   IASORS 1 IASVEL 1 ICHECW 0
+
+
+open unit 1 write card name heat.crd
+write coor card unit 1
+close unit 1
+
+
+open write unit 10 card name heat.pdb
+write coor unit 10 pdb
+
+
+OPEN READ  UNIT 30 CARD NAME heat.res     ! Restart file
+OPEN WRITE UNIT 31 CARD NAME equi.res      ! Restart file
+OPEN WRITE UNIT 32 FILE NAME equi.dcd      ! Coordinates file
+
+
+DYNA RESTRT VERL NSTE 25000 TIME 0.001 inbfrq 10 IMGFRQ 10 -
+   IPRFRQ 100 IEQFRQ 200  IHBFRQ 0 NTRFRQ 100 -
+   IUNREA 30 IUNWRI 31 IUNCRD 32 IUNVEL -1 -
+   NPRINT 1000 nsavc 100  -
+   FIRSTT 300.0 FINALT 300.0 -
+   TWINDH 10.0 TWINDL -10.0 -
+   IASORS 1 IASVEL 1 ICHECW 0
+
+
+OPEN UNIT 3 WRITE CARD NAME equi.psf
+WRITE PSF CARD UNIT 3 
+CLOSE UNIT 3
+
+OPEN UNIT 1 WRITE CARD NAME equi.pdb
+WRITE COOR PDB UNIT 1
+CLOSE UNIT 1
+
+OPEN UNIT 1 WRITE CARD NAME equi.crd
+WRITE COOR CARD UNIT 1
+CLOSE UNIT 1
+
+
+stop

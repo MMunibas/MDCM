@@ -1,0 +1,62 @@
+* trialanine in waterbox for comparison with DCM routines
+*
+
+bomlev -1
+prnlev 4 node 0
+
+set ref ../1-charmm-files
+set dcmfile ../9-remove-cap/trp.dcm
+
+open unit 30 card read name @ref/par/top_all36_prot.rtf
+read rtf card unit 30
+close unit 30
+
+open unit 31 card read name @ref/par/par_all36_prot.prm
+read para card flex unit 31
+close unit 31
+
+stream @ref/par/toppar_water_ions.str
+
+READ SEQUENCE CARD
+* tripeptide with DCM side chain charges
+*
+ 3
+ALA TRP ALA
+
+GENERATE LIG FIRST NONE LAST NONE ANGLEs DIHEdrals SETUP
+
+! generate initial coordinates
+IC GENErate 
+IC PARAM
+IC SEED LIG 2 N LIG 2 CA LIG 2 C
+IC BUILD
+
+!set nonbonding parameters
+
+nbond nbxmod 5 atom cdie eps 1.0 -
+  cutnb 14.0 cutim 14.0 ctofnb 12.0 ctonnb 10.0 -
+  vswitch vatom vdist e14f 1.0
+
+update
+
+!cons fix sele .not. ((segid WAT)) end
+shake bonh para tol 1.0e-8
+
+open unit 1 write card name gene.crd
+write coor card unit 1
+close unit 1
+
+energy
+
+!================================================================
+!Initialize DCM
+!================================================================
+OPEN UNIT 35 READ CARD NAME @dcmfile
+OPEN UNIT 11 WRITE CARD NAME dcm-coords.xyz
+DCM IUDCM 35 TSHIFT XYZ 11
+CLOSE UNIT 35
+
+energy
+
+stop
+

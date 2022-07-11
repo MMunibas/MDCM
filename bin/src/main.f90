@@ -4443,6 +4443,7 @@ subroutine read_command_line_arguments()
           call get_command_argument(i+1, arg, l)
             read(arg,*,iostat = ios) dcut
             dcut=dcut/hartree2kcal !convert from kcal/mol to Hartree
+            write(*,'(A,F7.5)') "Convergence cutoff (Hartree): ",dcut
         end if
        
         ! simplex refinement only
