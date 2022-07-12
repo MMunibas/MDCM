@@ -1,0 +1,43 @@
+EXAMPLE: FRAGMENT MULTI-CONFORMER FIT (Mike Devereux)
+=====================================================
+
+In this example we combine fragment fitting, which has the advantage of scaling
+well to large molecules with many charges, with multi-conformer fitting, which
+is particularly important for larger molecules which tend to have more
+conformational degrees of freedom than small molecules.
+
+The example is general to any multi-conformer fragment fit, but in this case we
+take the side-chain optimization from the "sidechain-fit" folder as an example.
+The reference ESP and density grids therefore have the backbone and capping
+group atoms removed, performed in the 3rd step of that example. The fitted model
+produced at the end can then be further processed by applying steps 8-10 from
+that example to produce a full TRP residue with optimized sidechain and CHARMM
+charges for the backbone.
+
+The basic approach is:
+
+1. Fit atomic multipole moments to the molecular ESP of the 1st conformer, which
+becomes the reference, then fit new atomic multipoles for each of the other
+conformers but this time constraining the atomic charges to those of the
+reference conformer. In this way we ensure that the fragments we build from
+these atomic multipoles have the same net charge for all conformers.
+
+2. Fit atomic charge models to the atomic multipole moments. As these are only
+required to prvide an initial guess for subsequent DE fitting of the fragments
+we only consider one conformer, decreasing the fitting time.
+
+3. Fit fragment charge models to a reference fragment ESP generated from the
+fitted atomic multipole moments from step 1. These charge models are fitted to
+all conformers simultaneously.
+
+4. Find the combination of fragment models for a given number of molecular
+charges that gives the lowest predicted RMSE (based on the mean RMSE of the
+component fragment models). Combine these fragment models to create a molecular
+charge model.
+
+5. Refine the molecular charge models with many charges using simplex
+optimization, now fitting to the original (usually ab initio) reference ESP data
+of the full system for all conformers.
+
+6. Analyze the finished model for quality of the ESP fit for each conformer, and
+generate ESP grids and error grids for visualization of the performance.
