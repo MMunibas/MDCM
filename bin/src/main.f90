@@ -2189,9 +2189,19 @@ end function mae_qtot
 real(rp) function mae(q)
     implicit none
     real(rp), dimension(:) :: q ! input charges
+    real(rp), dimension(size(q,dim=1)) :: q2,q3 ! transformed charges
     integer :: idx,i
     mae = 0._rp
-    do i=1,Nconf
+
+    do idx = 1,Ngrid(1)
+      mae = mae + abs(coulomb_potential(gridval(1,:,idx),q) - esp_grid(1,idx))
+    end do
+    do i=2,Nconf
+      if(i == 2) then
+        call assign_charges_to_atoms(q,1)
+        call global_to_local(q,q2,1) !transform charge positions to local coords
+      end if
+      call local_to_global(q2,q3,i) !transform back to global for new conformer
       do idx = 1,Ngrid(i)
         mae = mae + abs(coulomb_potential(gridval(i,:,idx),q) - esp_grid(i,idx))
       end do
@@ -2224,10 +2234,20 @@ end function max_ae_qtot
 real(rp) function max_ae(q)
     implicit none
     real(rp), dimension(:) :: q ! input charges
+    real(rp), dimension(size(q,dim=1)) :: q2,q3 ! transformed charges
     real(rp) :: ae
     integer :: idx,i
     max_ae = -vbig
-    do i=1,Nconf
+    do idx = 1,Ngrid(1)
+      ae = abs(coulomb_potential(gridval(1,:,idx),q) - esp_grid(1,idx))
+      if(ae > max_ae) max_ae = ae
+    end do
+    do i=2,Nconf
+      if(i == 2) then
+        call assign_charges_to_atoms(q,1)
+        call global_to_local(q,q2,1) !transform charge positions to local coords
+      end if
+      call local_to_global(q2,q3,i) !transform back to global for new conformer
       do idx = 1,Ngrid(i)
         ae = abs(coulomb_potential(gridval(i,:,idx),q) - esp_grid(i,idx))
         if(ae > max_ae) max_ae = ae
