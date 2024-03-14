@@ -180,6 +180,7 @@ integer, save, dimension(:,:), allocatable :: frames
 integer, dimension(:), allocatable :: ref_atms ! to store nearest atom to each charge
 integer :: Nconf,tNconf,Nmtp ! number of conformers and mtp files loaded
 integer :: Nframes ! number of local axis frames
+integer :: nchgs ! local loop over charges
 real(rp), dimension(:,:,:), allocatable :: ex1,ey1,ez1,ex2,ey2,ez2,ex3,ey3,ez3 ! local axes
 character(len=2), dimension(:), allocatable :: frametypes ! can be bond or bisector-type local axis frame
 
@@ -281,12 +282,12 @@ if(generate_mode) then
         
         if(generate_atomic) then
             do a = 1,Natom
-                do num_charges = 1,num_charges_max_multipole
+                do nchgs = 1,num_charges_max_multipole
                     !calculate esp grid and slice data for the multipole of atom a
                     call calc_multipole_grid_and_slice_data(multipole,a,1) 
                     !read the charges
                     write(dummystring, '(I0)') a
-                    write(dummystring2,'(I0)') num_charges
+                    write(dummystring2,'(I0)') nchgs
                     input_xyzfile = "multipole"//trim(dummystring)//"_"//trim(dummystring2)//"charges.xyz"
                     if(trim(prefix) /= '') input_xyzfile  = trim(prefix)//"/"//trim(input_xyzfile)
                     call read_xyz_file()
@@ -350,7 +351,7 @@ if(generate_mode) then
         ! plot with R
         call write_image_slice_data(charges,Nconf) !for visualization with R
 !        call execute_command_line("./visualize.r",wait=.true.)
-        write(dummystring,'(I0)') num_charges 
+        write(dummystring,'(I0)') nchgs 
         if(trim(prefix) /= '') then
             dummystring = trim(prefix)//"/"//trim(dummystring)//"charges_comparison.png"
         else
