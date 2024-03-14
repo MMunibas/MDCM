@@ -180,7 +180,7 @@ integer, save, dimension(:,:), allocatable :: frames
 integer, dimension(:), allocatable :: ref_atms ! to store nearest atom to each charge
 integer :: Nconf,tNconf,Nmtp ! number of conformers and mtp files loaded
 integer :: Nframes ! number of local axis frames
-integer :: nchgs ! local loop over charges
+integer :: nchgs ! local num_charges variable
 real(rp), dimension(:,:,:), allocatable :: ex1,ey1,ez1,ex2,ey2,ez2,ex3,ey3,ez3 ! local axes
 character(len=2), dimension(:), allocatable :: frametypes ! can be bond or bisector-type local axis frame
 
@@ -282,15 +282,15 @@ if(generate_mode) then
         
         if(generate_atomic) then
             do a = 1,Natom
-                do nchgs = 1,num_charges_max_multipole
+                do num_charges = 1,num_charges_max_multipole
                     !calculate esp grid and slice data for the multipole of atom a
                     call calc_multipole_grid_and_slice_data(multipole,a,1) 
                     !read the charges
                     write(dummystring, '(I0)') a
-                    write(dummystring2,'(I0)') nchgs
+                    write(dummystring2,'(I0)') num_charges
                     input_xyzfile = "multipole"//trim(dummystring)//"_"//trim(dummystring2)//"charges.xyz"
                     if(trim(prefix) /= '') input_xyzfile  = trim(prefix)//"/"//trim(input_xyzfile)
-                    call read_xyz_file()
+                    call read_xyz_file(nchgs)
                     ! plot with R
                     call write_image_slice_data(charges,1) !for visualization with R
 !                    call execute_command_line("./visualize.r", wait=.true.)
@@ -331,7 +331,8 @@ if(generate_mode) then
         if(input_xyzfile == '')then
           call throw_error('No charge file supplied via -xyz to generate cube')
         endif
-        call read_xyz_file()
+        call read_xyz_file(nchgs)
+        num_charges=nchgs
         if(Nconf>1)then ! we want to test a conformer than we haven't fitted for
           allocate(lcharges(size(charges,dim=1)))
           call assign_charges_to_atoms(charges,1)
@@ -351,7 +352,7 @@ if(generate_mode) then
         ! plot with R
         call write_image_slice_data(charges,Nconf) !for visualization with R
 !        call execute_command_line("./visualize.r",wait=.true.)
-        write(dummystring,'(I0)') nchgs 
+        write(dummystring,'(I0)') num_charges 
         if(trim(prefix) /= '') then
             dummystring = trim(prefix)//"/"//trim(dummystring)//"charges_comparison.png"
         else
@@ -2836,18 +2837,18 @@ end subroutine read_multipole_file
 
 
 !-------------------------------------------------------------------------------
-subroutine read_xyz_file()
+subroutine read_xyz_file(nchgs)
 implicit none
-integer :: i,ios
+integer :: i,ios,nchgs
 character(len=1024) :: dummy
 real(rp) :: tmp
 
 open(30, file=trim(input_xyzfile), status="old", action="read", iostat = ios)
 if(ios /= 0) call throw_error('Could not open "'//trim(input_xyzfile)//'" for reading')
-read(30,*,iostat=ios) num_charges
-qdim = 4*num_charges-1
-if((ios /= 0).or.(num_charges < 1)) call throw_error('"'//trim(input_xyzfile)//'" has the wrong format.')
-if(.not.allocated(charges)) allocate(charges(4*num_charges-1))
+read(30,*,iostat=ios) nchgs
+qdim = 4*nchgs-1
+if((ios /= 0).or.(nchgs < 1)) call throw_error('"'//trim(input_xyzfile)//'" has the wrong format.')
+if(.not.allocated(charges)) allocate(charges(4*nchgs-1))
 read(30,*,iostat=ios) !skip comment line
 total_charge  = 0._rp
 !read charge coordinates and magnitude
@@ -2865,7 +2866,7 @@ end do
 
 if(verbose)then
   write(*,*) 'Read ',trim(input_xyzfile)
-  write(*,*) num_charges,' charges'
+  write(*,*) nchgs,' charges'
   write(*,*) 'Total charge: ',total_charge
   write(*,*)
 end if
