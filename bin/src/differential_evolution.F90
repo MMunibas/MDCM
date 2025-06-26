@@ -411,7 +411,7 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop,dcut)
     interface
         real*8 function func(y)
             !real*8, dimension(:), intent(in) :: y
-            real*8, dimension(:) :: y
+            real*8, intent(in) :: y(:)
         end function func
     end interface 
     interface
@@ -709,7 +709,7 @@ subroutine compare_solutions(func,feasible,sumconstr,x1,f1,fsble1,constr1,x2,fun
     implicit none
     interface
         real*8 function func(y)
-            real*8, dimension(:) :: y
+            real*8, intent(in) :: y(:)
         end function func
     end interface 
     interface
@@ -816,7 +816,7 @@ subroutine DE_simplex(func,feasible,sol) !local optimization to refine solution
     real(rp), dimension(:), intent(inout) :: sol !solution
     interface
         real*8 function func(y)
-            real*8, dimension(:) :: y
+            real*8, intent(in) :: y(:)
         end function func
     end interface 
     interface

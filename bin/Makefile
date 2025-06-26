@@ -20,10 +20,14 @@ NVFLAGS = -D GPU -g -O0 #-Mbounds -Mchkptr -Mchkstk # nvfortran
 # FOR CPU
 F90 = gfortran
 FFLAGS_PAR = -fopenmp -cpp -fcheck=bounds,mem -g #-pg
-LFLAGS_PAR = -fopenmp -g #-pg
+LFLAGS_PAR = -fopenmp -g -lopenblas #-pg
+#FFLAGS_PAR = -fopenmp -cpp -fcheck=all -fstack-protector -fsanitize=undefined -g #-pg
+#LFLAGS_PAR = -fopenmp -fsanitize=undefined -fsanitize=address -g -lopenblas #-pg
 #FFLAGS     = -O3 -g 
+#FFLAGS     = -cpp -fcheck=all -fstack-protector -fsanitize=undefined -g #-pg
+#LFLAGS     = -fsanitize=undefined -fsanitize=address -g -lopenblas #-pg
 FFLAGS     = -fcheck=bounds,mem -g -cpp #-pg
-LFLAGS     = -g #-pg
+LFLAGS     = -g -lopenblas #-pg
 
 .SUFFIXES: .f90 .f .o .cu .cuf
 
@@ -33,6 +37,8 @@ LFLAGS     = -g #-pg
 
 OBJS = \
 differential_evolution.o \
+g-nes.o \
+lbfgs.o \
 symmetry.o \
 main.o \
 
@@ -44,6 +50,8 @@ cuda_main.o \
 
 OBJS_PAR = \
 pdifferential_evolution.o \
+pg-nes.o \
+plbfgs.o \
 psymmetry.o \
 pmain.o \
 
@@ -70,22 +78,38 @@ cudacubefit.x : $(CUDA_OBJS)
 pdifferential_evolution.o : src/differential_evolution.F90
 	$(F90) -c $(FFLAGS_PAR) $(INCLUDES) -o $@ src/differential_evolution.F90
 
+pg-nes.o : src/g-nes.f90
+	$(F90) -c $(FFLAGS_PAR) $(INCLUDES) -o $@ src/g-nes.f90
+
+plbfgs.o : src/lbfgs.f90
+	$(F90) -c $(FFLAGS_PAR) $(INCLUDES) -o $@ src/lbfgs.f90
+
 psymmetry.o : src/symmetry.f90
 	$(F90) -c $(FFLAGS_PAR) $(INCLUDES) -o $@ src/symmetry.f90
 
 pmain.o : src/main.f90 \
 pdifferential_evolution.o \
+pg-nes.o \
+lbfgs.o \
 psymmetry.o 
 	$(F90) -c $(FFLAGS_PAR) $(INCLUDES) -o $@ src/main.f90
 
 differential_evolution.o : src/differential_evolution.F90
 	$(F90) -c $(FFLAGS) $(INCLUDES) -o $@ src/differential_evolution.F90
-	
+
+g-nes.o : src/g-nes.f90
+	$(F90) -c $(FFLAGS) $(INCLUDES) -o $@ src/g-nes.f90
+
+lbfgs.o : src/lbfgs.f90
+	$(F90) -c $(FFLAGS) $(INCLUDES) -o $@ src/lbfgs.f90
+
 symmetry.o : src/symmetry.f90
 	$(F90) -c $(FFLAGS) $(INCLUDES) -o $@ src/symmetry.f90
 
 main.o : src/main.f90 \
 differential_evolution.o \
+g-nes.o \
+lbfgs.o \
 symmetry.o 
 	$(F90) -c $(FFLAGS) $(INCLUDES) -o $@ src/main.f90
 

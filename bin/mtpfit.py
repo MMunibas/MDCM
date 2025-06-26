@@ -436,8 +436,8 @@ rmse = np.sqrt(np.mean((np.matmul(A,x)-grid_val)**2))
 maxe = np.amax(np.absolute(np.matmul(A,x)-grid_val))
 maxmep = np.amax(np.absolute(grid_val)) * hartreetokcal
 meanabsmep = np.mean(np.absolute(grid_val)) * hartreetokcal
-print("Max MEP = "+str(maxmep)+"\n")
-print("Mean abs MEP = "+str(meanabsmep)+"\n")
+f.write("Max MEP = "+str(maxmep)+"\n")
+f.write("Mean abs MEP = "+str(meanabsmep)+"\n")
 qtot=np.sum(x[:Natom])
 if fixq:
   qtot=np.sum(fix_qs[:Natom])

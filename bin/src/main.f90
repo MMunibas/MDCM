@@ -5,9 +5,17 @@
 !      Authors: Oliver Unke and Mike Devereux
 !
 !///////////////////////////////////////////////////////////////////////////////
+!
+! NOTES: This code was originally written to fit to a single grid, there was therefore
+! no need for local axes. With the introduction of multiple grids for different
+! conformers, it would make more sense to fit charge positions in internal coordinates 
+! instead of using global coordinates for the first grid, then transforming to local
+! and back to global for each other grid
+!
 program cubefit
 use differential_evolution
 use symmetry
+use gnes_optimizer
 #ifdef GPU
 use rmse_gpu
 #endif
@@ -224,6 +232,7 @@ end do
 
 !read axis frames if we have multiple conformers
 if(Nconf>1) then
+  write(*,*) '***** STARTING READ AXIS FRAMES *****'
   call read_axis_frames()
   do i=1,Nconf
     if(.not.allocated(ex1))then
@@ -234,10 +243,12 @@ if(Nconf>1) then
     call get_local_axes(i,ex1(i,:,:),ey1(i,:,:),ez1(i,:,:),ex2(i,:,:), &
        ey2(i,:,:),ez2(i,:,:),ex3(i,:,:),ey3(i,:,:),ez3(i,:,:))
   end do
+  write(*,*) '***** ENDING READ AXIS FRAMES *****'
 end if
 
 ! analysis mode: evaluate quality of fit only
 if(analysis_mode) then
+    write(*,*) '***** STARTING ANALYSIS MODE TO EVALUATE QUALITY OF FIT *****'
     if(Nconf > 1)then
       call throw_error('Sorry, multiple conformers are not yet implemented in analysis mode, please use '&
        //'-refcube with -generate, then analysis instead')
@@ -267,10 +278,16 @@ if(analysis_mode) then
     end if
     call execute_command_line("mv comparison.png "//trim(dummystring),wait=.true.)
     if(verbose) write(*,'(A)') "Did analysis and wrote slice data"
+    write(*,*) '***** ENDING ANALYSIS MODE TO EVALUATE QUALITY OF FIT *****'
     stop
 end if
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!
 ! generate mode: generate new cube file only
+!
 if(generate_mode) then
+    write(*,*) '***** STARTING CUBEGEN MODE TO GENERATE NEW CUBE FILE(S) *****'
     if(fit_multipoles) then
         !allocate memory
         if(.not.allocated(multipole))      allocate(multipole(Nconf,(lmax+1)**2*Natom))
@@ -361,6 +378,7 @@ if(generate_mode) then
         call execute_command_line("mv comparison.png "//trim(dummystring),wait=.true.)
         if(verbose) write(*,'(A)') "Written cubefile and slice data"
     end if
+    write(*,*) '***** ENDING CUBEGEN MODE TO GENERATE NEW CUBE FILE(S) *****'
     stop
 end if
 
@@ -383,8 +401,12 @@ if(verbose) write(*,*)
 if(verbose) write(*,*) 
 if(verbose) write(*,*) 
 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!
 !when fitting the atomic multipoles instead of charges
+!
 if(fit_multipoles) then
+    write(*,*) '***** STARTING DEPRECATED MULTIPOLE FIT METHOD *****'
     if(use_symmetry) then ! should have been caught earlier during argument parsing!
       call throw_error('sorry, symmetry module does not yet work with multipole fits')
     end if
@@ -478,14 +500,17 @@ if(fit_multipoles) then
         end do
     end do 
     call DE_exit()
+    write(*,*) '***** ENDING DEPRECATED MULTIPOLE FIT METHOD *****'
     stop
 end if
 
 
-
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!
 !when fitting atomic charges to the atomic multipoles
+!
 if(use_greedy_fit) then
-
+    write(*,*) '***** STARTING ATOMIC CHARGE FIT *****'
     if(use_symmetry) then 
       if(.not.allocated(symFitAtms)) allocate(symFitAtms(Natom))
       ! first remove atoms that are redundant due to symmetry
@@ -680,20 +705,22 @@ if(use_greedy_fit) then
   
               ! initialize search_range
               call init_search_range()
-  
-              call DE_init(set_range            = search_range(:,1:qdim), &
-                           set_popSize          = 10*qdim,                &
-                           set_maxGens          = 2000*num_charges,       &
-                           set_crossProb        = 1.00_rp,                &
-                           set_maxChilds        = 1,                      &
-                           set_forceRange       = .false.,                &
-                           set_mutationStrategy = DEtargettobest1,        &
-                           set_verbose          = verbose,                &
-                           set_Nprint           = 100)  
+              ! initialize optimizer
+              ! initial sigma should be ca. 10 % of parameter range
+              call initialize_gnes_optimizer(initialize_mu = gnes_init_pop_multipole, &
+                                           dim             = qdim,               &
+                                           population      = 10*qdim,            &
+                                           iterations      = 300,                &
+                                           refine_every    = 10,                 &
+                                           learning_rate   = 0.05_rp,            &
+                                           sigma0          = 0.2_rp,             &
+                                           decay           = 0.8_rp)
+!                                           decay           = 0.95_rp)
+
             endif
             do try = 1,num_trials
-                if(verbose) write(*,'(3(A,I0))') "Starting fitting procedure for multipole expansion of atom ",a,&
-                                                   " with ",num_charges," charges, trial ",try
+                if(verbose) write(*,'(3(A,I0))') "Starting fitting procedure for atom ",a,&
+                                                   " to atomic multipole expansion ESP for ",num_charges," charges, trial ",try
                 if(use_symmetry)then
                   ! (re)initialize symmetry-constrained search
                   call DE_exit()
@@ -719,9 +746,8 @@ if(use_greedy_fit) then
                         multipole_solutions(1:qdim,num_charges,a),&
                         num_charges,symFitAtms,num_symFitAtms,total_charge,.false.)
                 else
-                  call DE_optimize(rmse_qtot,feasible,sum_constr,&
-                        multipole_solutions(1:qdim,num_charges,a),&
-                        init_pop=init_pop_multipole,dcut=dcut)
+                  call optimize_gnes(rmse_qtot,drmse_qtot, &
+                                      search_range,multipole_solutions(1:qdim,num_charges,a))
                 endif
 
                 ! measure the quality of the fit
@@ -836,11 +862,15 @@ if(use_greedy_fit) then
     if(allocated(sliceYZ2))     deallocate(sliceYZ2)
     if(allocated(search_range)) deallocate(search_range)    
     if(allocated(ref_atms))     deallocate(ref_atms)
+    write(*,*) '***** ENDING ATOMIC CHARGE FIT *****'
     if(greedy_only_multi) stop 
 end if
 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!
 !Change reference MEP to the multipolar MEP if we're fitting a fragment rather
 !than the whole molecule
+!
 
 !allocate memory for the multipole information and read it
 if(.not.allocated(multipole))                 allocate(multipole(Nconf,(lmax+1)**2*Natom))
@@ -896,8 +926,12 @@ endif
   if(gpu) call gpu_set_ESPgrid(gridval(1,:,:), esp_grid(1,:), Ngrid(1))
 #endif
 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!
 !refining the solution
+!
 if(refine_solution) then
+    write(*,*) '***** STARTING MODEL REFINEMENT MODE *****'
     ! symmetry not yet implemented for refinement
     if(use_symmetry)then
       call throw_error('Sorry, symmetry is not yet implemented for model refinement')
@@ -1019,17 +1053,21 @@ if(refine_solution) then
     endif
 
     bestcharges = charges 
-    
-    !initialize DE
-    call DE_init(set_range            = search_range(:,1:qdim), &
-                 set_popSize          = 10*qdim,                &
-                 set_maxGens          = 2000*num_charges,       &
-                 set_crossProb        = 1.00_rp,                &
-                 set_maxChilds        = 1,                      &
-                 set_forceRange       = .false.,                &
-                 set_mutationStrategy = DEtargettobest1,        &
-                 set_verbose          = verbose,                &
-                 set_Nprint           = 100)  
+
+    ! initialize search_range
+    call init_search_range()
+    ! initialize optimizer
+    ! initial sigma should be ca. 10 % of parameter range
+    call initialize_gnes_optimizer(initialize_mu = gnes_init_pop_multipole, &
+                                 dim             = qdim,               &
+                                 population      = 10*qdim,            &
+                                 iterations      = 300,                &
+                                 refine_every    = 10,                 &
+                                 learning_rate   = 0.05_rp,            &
+                                 sigma0          = 0.2_rp,             &
+                                 decay           = 0.8_rp)
+!                                 decay           = 0.95_rp)
+
     if(simplex_only .and. num_trials > 1) then
       num_trials=1
       write(*,'(A)') "Warning: number of trials should be 1 for simplex optimization"
@@ -1042,10 +1080,20 @@ if(refine_solution) then
              write(*,'(A)') "User requested refinement using simplex algorithm (no DE)"
              write(*,'(A)')
           endif
+          !initialize DE
+          call DE_init(set_range            = search_range(:,1:qdim), &
+                       set_popSize          = 10*qdim,                &
+                       set_maxGens          = 2000*num_charges,       &
+                       set_crossProb        = 1.00_rp,                &
+                       set_maxChilds        = 1,                      &
+                       set_forceRange       = .false.,                &
+                       set_mutationStrategy = DEtargettobest1,        &
+                       set_verbose          = verbose,                &
+                       set_Nprint           = 100)  
           call DE_simplex(rmse_qtot,feasible,charges(1:qdim))
         else
-          call DE_optimize(rmse_qtot,feasible,sum_constr,charges(1:qdim),&
-                           guess=charges(1:qdim),dcut=dcut)
+          call optimize_gnes(rmse_qtot,drmse_qtot, &
+                 search_range,charges(1:qdim))
           if(verbose) write(*,'(A,I0,A,I0)') "Starting refinement for ",num_charges," charges, trial ",try
         endif
         ! measure the quality of the fit
@@ -1099,11 +1147,14 @@ if(refine_solution) then
     end if
     if(verbose) write(*,*)
     call DE_exit()
+    write(*,*) '***** ENDING MODEL REFINEMENT MODE *****'
     stop
 end if
 
-
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!
 ! allocate memory
+!
 allocate(charges(4*num_charges_max-1), bestcharges(4*num_charges_max-1), search_range(2,4*num_charges_max-1), stat=ios)
 if(ios /= 0) call throw_error('Could not allocate memory.')
 if(use_symmetry) allocate(sym_charges(4*num_charges_max-1)) !max. possible size
@@ -1129,7 +1180,11 @@ if(.not.use_symmetry.and.num_charges_max > num_charges_max_multipole*natmfit) th
   write(*,*)
 endif
 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!
 ! start fit for full molecule (or fragment defined by -atom flag)
+!
+write(*,*) '***** STARTING FULL MOLECULE CHARGE FIT *****'
 do num_charges = num_charges_min,num_charges_max
     !calculate dimensionality
     qdim = 4*num_charges-1 
@@ -1167,15 +1222,29 @@ do num_charges = num_charges_min,num_charges_max
       if(allocated(search_range)) deallocate(search_range)
       allocate(search_range(2,4*num_charges))
       call init_search_range()
-      call DE_init(set_range            = search_range(:,1:qdim), &
-                     set_popSize          = 10*qdim,                &
-                     set_maxGens          = 2000*num_charges,       &
-                     set_crossProb        = 1.00_rp,                &
-                     set_maxChilds        = 1,                      &
-                     set_forceRange       = .false.,                &
-                     set_mutationStrategy = DEtargettobest1,        &
-                     set_verbose          = verbose,                &
-                     set_Nprint           = 100)  
+      ! initialize optimizer
+      ! initial sigma should be ca. 10 % of parameter range
+      if(use_greedy_fit) then
+        call initialize_gnes_optimizer(initialize_mu = gnes_init_pop_greedy, &
+                                     dim          = qdim,             &
+                                   population     = 10*qdim,          &
+                                   iterations     = 300,              &
+                                   refine_every   = 10,               &
+                                   learning_rate  = 0.05_rp,          &
+                                   sigma0         = 0.2_rp,           &
+                                   decay          = 0.8_rp)
+!                                   decay          = 0.95_rp)
+      else
+        call initialize_gnes_optimizer(initialize_mu = gnes_init_pop, &
+                                     dim          = qdim,             &
+                                   population     = 10*qdim,          &
+                                   iterations     = 300,              &
+                                   refine_every   = 10,               &
+                                   learning_rate  = 0.05_rp,          &
+                                   sigma0         = 0.2_rp,           &
+                                   decay          = 0.8_rp)
+!                                   decay          = 0.95_rp)
+      end if
     endif
     do try = 1,num_trials
         if(verbose) write(*,'(A,I0,A,I0)') "Starting fitting procedure for ",num_charges," charges, trial ",try
@@ -1204,13 +1273,10 @@ do num_charges = num_charges_min,num_charges_max
                 charges,&
                 num_charges,symFitAtms,num_symFitAtms,total_charge,.true.)
         else
-          if(use_greedy_fit) then
-              call DE_optimize(rmse_qtot,feasible,sum_constr,charges(1:qdim),&
-                               init_pop=init_pop_greedy,dcut=dcut)
-          else
-              call DE_optimize(rmse_qtot,feasible,sum_constr,charges(1:qdim),&
-                               init_pop=init_pop,dcut=dcut)
-          end if
+!              call DE_optimize(rmse_qtot,feasible,sum_constr,charges(1:qdim),&
+!                               init_pop=init_pop_greedy,dcut=dcut)
+          call optimize_gnes(rmse_qtot,drmse_qtot, &
+                                 search_range,charges(1:qdim))
         endif
         ! measure the quality of the fit
         RMSE_tmp = rmse_qtot(charges(1:qdim)) 
@@ -1271,8 +1337,17 @@ do num_charges = num_charges_min,num_charges_max
     ! clean up
     call DE_exit()
 end do
+write(*,*) '***** ENDING FULL MOLECULE CHARGE FIT *****'
 stop
 call dealloc()
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!
+! SUBROUTINES AND FUNCTIONS START HERE:
+!
+!
+
 
 contains
 !-------------------------------------------------------------------------------
@@ -1486,7 +1561,7 @@ subroutine global_to_local(gq,lq,lconf)
     integer, dimension(Natom) :: atm_frames
     integer :: i,j,lconf,counter
     integer :: atm1,atm2,atm3
-    real(rp), dimension(3) :: tpos
+    real(rp), dimension(3) :: tpos,tex1,tey1,tez1,tex2,tey2,tez2,tex3,tey3,tez3
 
     !store positions in pos array
     counter=0
@@ -1501,14 +1576,26 @@ subroutine global_to_local(gq,lq,lconf)
       atm2=frames(i,2)
       atm3=frames(i,3)
 
+      tex1=ex1(lconf,i,:)
+      tey1=ey1(lconf,i,:)
+      tez1=ez1(lconf,i,:)
+
+      tex2=ex2(lconf,i,:)
+      tey2=ey2(lconf,i,:)
+      tez2=ez2(lconf,i,:)
+
+      tex3=ex3(lconf,i,:)
+      tey3=ey3(lconf,i,:)
+      tez3=ez3(lconf,i,:)
+
       if(atm_frames(atm1) == 0) then
-        atm_frames(atm1)=i
+        atm_frames(atm1)=i ! record that this atm is defined by frame i
         do j=1,num_charges
           if(ref_atms(j) == atm1) then ! if charge belongs to atm1 of frame
             tpos=pos(j,:)-atom_pos(lconf,:,atm1)
-            lpos(j,1)=dot(tpos,ex1(lconf,i,:))
-            lpos(j,2)=dot(tpos,ey1(lconf,i,:))
-            lpos(j,3)=dot(tpos,ez1(lconf,i,:))
+            lpos(j,1)=dot(tpos,tex1)
+            lpos(j,2)=dot(tpos,tey1)
+            lpos(j,3)=dot(tpos,tez1)
           end if
         end do
       end if
@@ -1517,9 +1604,9 @@ subroutine global_to_local(gq,lq,lconf)
         do j=1,num_charges
           if(ref_atms(j) == atm2) then ! if charge belongs to atm2 of frame
             tpos=pos(j,:)-atom_pos(lconf,:,atm2)
-            lpos(j,1)=dot(tpos,ex2(lconf,i,:))
-            lpos(j,2)=dot(tpos,ey2(lconf,i,:))
-            lpos(j,3)=dot(tpos,ez2(lconf,i,:))
+            lpos(j,1)=dot(tpos,tex2)
+            lpos(j,2)=dot(tpos,tey2)
+            lpos(j,3)=dot(tpos,tez2)
           end if
         end do
       end if
@@ -1528,9 +1615,9 @@ subroutine global_to_local(gq,lq,lconf)
         do j=1,num_charges
           if(ref_atms(j) == atm3) then ! if charge belongs to atm3 of frame
             tpos=pos(j,:)-atom_pos(lconf,:,atm3)
-            lpos(j,1)=dot(tpos,ex3(lconf,i,:))
-            lpos(j,2)=dot(tpos,ey3(lconf,i,:))
-            lpos(j,3)=dot(tpos,ez3(lconf,i,:))
+            lpos(j,1)=dot(tpos,tex3)
+            lpos(j,2)=dot(tpos,tey3)
+            lpos(j,3)=dot(tpos,tez3)
           end if
         end do
       end if
@@ -1547,6 +1634,89 @@ subroutine global_to_local(gq,lq,lconf)
     end do
 
 end subroutine global_to_local
+
+!-------------------------------------------------------------------------------
+! converts RMSE charge derivatives in global coordinates to local coordinates
+subroutine dglobal_to_local(gq,lq,lconf)
+    implicit none
+    real(rp), dimension(:) :: lq,gq
+    real(rp), dimension(num_charges,3) :: drmse,ldrmse
+    real(rp), dimension(3) :: tpos,tex1,tey1,tez1,tex2,tey2,tez2,tex3,tey3,tez3
+    integer, dimension(Natom) :: atm_frames
+    integer :: i,j,lconf,counter
+    integer :: atm1,atm2,atm3
+
+    !store positions in pos array
+    counter=0
+    do i = 1,size(gq,dim=1),4
+        counter = counter + 1
+        drmse(counter,:) = gq(i:i+2)
+    end do
+
+    atm_frames(:) = 0
+    do i=1,Nframes
+      atm1=frames(i,1)
+      atm2=frames(i,2)
+      atm3=frames(i,3)
+
+      tex1=ex1(lconf,i,:)
+      tey1=ey1(lconf,i,:)
+      tez1=ez1(lconf,i,:)
+
+      tex2=ex2(lconf,i,:)
+      tey2=ey2(lconf,i,:)
+      tez2=ez2(lconf,i,:)
+
+      tex3=ex3(lconf,i,:)
+      tey3=ey3(lconf,i,:)
+      tez3=ez3(lconf,i,:)
+
+      if(atm_frames(atm1) == 0) then
+        atm_frames(atm1)=i ! record that this atm is defined by frame i
+        do j=1,num_charges
+          if(ref_atms(j) == atm1) then ! if charge belongs to atm1 of frame
+            tpos=drmse(j,:)
+            ldrmse(j,1)=dot(tpos,tex1)
+            ldrmse(j,2)=dot(tpos,tey1)
+            ldrmse(j,3)=dot(tpos,tez1)
+          end if
+        end do
+      end if
+      if(atm_frames(atm2) == 0) then
+        atm_frames(atm2)=i
+        do j=1,num_charges
+          if(ref_atms(j) == atm2) then ! if charge belongs to atm2 of frame
+            tpos=drmse(j,:)
+            ldrmse(j,1)=dot(tpos,tex2)
+            ldrmse(j,2)=dot(tpos,tey2)
+            ldrmse(j,3)=dot(tpos,tez2)
+          end if
+        end do
+      end if
+      if(atm_frames(atm3) == 0) then
+        atm_frames(atm3)=i
+        do j=1,num_charges
+          if(ref_atms(j) == atm3) then ! if charge belongs to atm3 of frame
+            tpos=drmse(j,:)
+            ldrmse(j,1)=dot(tpos,tex3)
+            ldrmse(j,2)=dot(tpos,tey3)
+            ldrmse(j,3)=dot(tpos,tez3)
+          end if
+        end do
+      end if
+    end do
+
+    !store transformed positions in lq array
+    counter=0
+    do i = 1,size(lq,dim=1),4
+        counter = counter + 1
+        lq(i:i+2) = ldrmse(counter,1:3)
+        if((i+3).le.size(lq,dim=1))then !handle last charge is empty to balance total charge
+          lq(i+3) = gq(i+3)
+        end if
+    end do
+
+end subroutine dglobal_to_local
 
 !-------------------------------------------------------------------------------
 ! converts charge positions in local coordinates to global coordinates
@@ -1627,13 +1797,91 @@ subroutine local_to_global(lq,gq,lconf)
 end subroutine local_to_global
 
 !-------------------------------------------------------------------------------
+! converts charge positions in local coordinates to global coordinates
+subroutine dlocal_to_global(lq,gq,lconf)
+    implicit none
+    real(rp), dimension(:) :: lq,gq
+    real(rp), dimension(num_charges,3) :: drmse,ldrmse
+    integer, dimension(Natom) :: atm_frames
+    integer :: i,j,lconf,counter
+    integer :: atm1,atm2,atm3
+
+    atm_frames(:)=0
+
+    !store positions in lpos array
+    counter=0
+    do i = 1,size(lq,dim=1),4
+        counter = counter + 1
+        ldrmse(counter,1:3) = lq(i:i+2)
+    end do
+
+    drmse(:,:)=0.d0
+    do i=1,Nframes
+      atm1=frames(i,1)
+      atm2=frames(i,2)
+      atm3=frames(i,3)
+
+      if(atm_frames(atm1) == 0) then
+        atm_frames(atm1)=i
+        do j=1,num_charges
+          if(ref_atms(j) == atm1) then ! if charge belongs to atm1 of frame
+            drmse(j,1)= ldrmse(j,1)*ex1(lconf,i,1) + &
+                     ldrmse(j,2)*ey1(lconf,i,1) + ldrmse(j,3)*ez1(lconf,i,1)
+            drmse(j,2)= ldrmse(j,1)*ex1(lconf,i,2) + &
+                     ldrmse(j,2)*ey1(lconf,i,2) + ldrmse(j,3)*ez1(lconf,i,2)
+            drmse(j,3)= ldrmse(j,1)*ex1(lconf,i,3) + &
+                     ldrmse(j,2)*ey1(lconf,i,3) + ldrmse(j,3)*ez1(lconf,i,3)
+          end if
+        end do
+      end if
+      if(atm_frames(atm2) == 0) then
+        atm_frames(atm2)=i
+        do j=1,num_charges
+          if(ref_atms(j) == atm2) then ! if charge belongs to atm1 of frame
+            drmse(j,1)= ldrmse(j,1)*ex2(lconf,i,1) + &
+                     ldrmse(j,2)*ey2(lconf,i,1) + ldrmse(j,3)*ez2(lconf,i,1)
+            drmse(j,2)= ldrmse(j,1)*ex2(lconf,i,2) + &
+                     ldrmse(j,2)*ey2(lconf,i,2) + ldrmse(j,3)*ez2(lconf,i,2)
+            drmse(j,3)= ldrmse(j,1)*ex2(lconf,i,3) + &
+                     ldrmse(j,2)*ey2(lconf,i,3) + ldrmse(j,3)*ez2(lconf,i,3)
+          end if
+        end do
+      end if
+      if(atm_frames(atm3) == 0) then
+        atm_frames(atm3)=i
+        do j=1,num_charges
+          if(ref_atms(j) == atm3) then ! if charge belongs to atm1 of frame
+            drmse(j,1)= ldrmse(j,1)*ex3(lconf,i,1) + &
+                     ldrmse(j,2)*ey3(lconf,i,1) + ldrmse(j,3)*ez3(lconf,i,1)
+            drmse(j,2)= ldrmse(j,1)*ex3(lconf,i,2) + &
+                     ldrmse(j,2)*ey3(lconf,i,2) + ldrmse(j,3)*ez3(lconf,i,2)
+            drmse(j,3)= ldrmse(j,1)*ex3(lconf,i,3) + &
+                     ldrmse(j,2)*ey3(lconf,i,3) + ldrmse(j,3)*ez3(lconf,i,3)
+          end if
+        end do
+      end if
+    end do
+
+    !store transformed positions in q array
+    counter=0
+    do i = 1,size(lq,dim=1),4
+        counter = counter + 1
+        gq(i:i+2) = drmse(counter,1:3)
+        if((i+3).le.size(gq,dim=1))then !handle last charge is empty to balance total charge
+          gq(i+3) = lq(i+3)
+        end if
+    end do
+
+end subroutine dlocal_to_global
+
+!-------------------------------------------------------------------------------
 ! determines local axes for a given conformer
 subroutine get_local_axes(lconf,lex1,ley1,lez1,lex2,ley2,lez2,lex3,ley3,lez3)
     implicit none
     integer :: lconf
     real(rp), dimension(:,:) :: lex1,ley1,lez1,lex2,ley2,lez2,lex3,ley3,lez3
     integer :: atm1,atm2,atm3,i
-    real(rp), dimension(3) :: b1,b2
+    real(rp), dimension(3) :: b1,b2,tb
     real(rp) :: r,rb1,rb2,rbi
     
 
@@ -1669,11 +1917,12 @@ subroutine get_local_axes(lconf,lex1,ley1,lez1,lex2,ley2,lez2,lex3,ley3,lez3)
       ley2(i,:)=ley1(i,:)
       ley3(i,:)=ley1(i,:)
 
-      lex1(i,:)=cross(b1,ley1(i,:))
+      tb=ley1(i,:)
+      lex1(i,:)=cross(b1,tb)
       r=norm2(lex1(i,:))
       lex1(i,:)=lex1(i,:)/r
       lex2(i,:)=lex1(i,:)
-      lex3(i,:)=cross(b2,ley1(i,:))
+      lex3(i,:)=cross(b2,tb)
       r=norm2(lex3(i,:))
       lex3(i,:)=lex3(i,:)/r
     end do
@@ -1887,7 +2136,7 @@ end function sum_constr
 ! (this means that the total charge must add up to a specific value)
 real(rp) function rmse_qtot(qin)
     implicit none
-    real(rp), dimension(:) :: qin ! input charges
+    real(rp), intent(in) :: qin(:) ! input charges
     real(rp), dimension(size(qin,dim=1)+1) :: q   ! complete charges
     real(rp) :: qsum
     integer :: i
@@ -1908,6 +2157,28 @@ real(rp) function rmse_qtot(qin)
     endif
 #endif
 end function rmse_qtot
+!-------------------------------------------------------------------------------
+
+!-------------------------------------------------------------------------------
+! computes derivative of root mean squared error of the current fit to the true esp,
+! using constraint charges (this means that the total charge must add up to a specific value)
+function drmse_qtot(qin,n) result (drmse_qtot_dq)
+    implicit none
+    real(rp), intent(in) :: qin(:) ! input charges
+    integer, intent(in) :: n
+    real(rp), dimension(n+1) :: q   ! complete charges
+    real(rp) :: drmse_qtot_dq(n) ! derivative array to return
+    real(rp) :: qsum
+    integer :: i
+    qsum = 0._rp
+    do i = 1,n-3,4
+        qsum = qsum + qin(i+3)
+    end do
+    q(1:n) = qin(:)
+    q(n+1) = total_charge - qsum
+
+    drmse_qtot_dq = drmse(q,size(q))
+end function drmse_qtot
 !-------------------------------------------------------------------------------
 
 !-------------------------------------------------------------------------------
@@ -1942,7 +2213,7 @@ end subroutine rmse_conformer_qtot
 ! are satisfied (i.e. charge arrangement possesses same symmetry as parent molecule)
 real(rp) function sym_rmse_qtot(sqin)
     implicit none
-    real(rp), dimension(:) :: sqin ! input charges
+    real(rp), intent(in) :: sqin(:) ! input charges
     real(rp), dimension(num_charges*4) :: q   ! complete charges
     real(rp) :: qsum
     qsum = 0._rp
@@ -1969,7 +2240,7 @@ end function sym_rmse_qtot
 ! are satisfied (i.e. charge arrangement possesses same symmetry as parent molecule)
 real(rp) function sym_atm_rmse_qtot(sqin)
     implicit none
-    real(rp), dimension(:) :: sqin ! input charges
+    real(rp), intent(in) :: sqin(:) ! input charges
     real(rp), dimension(num_charges*4) :: q   ! complete charges
     real(rp) :: qsum
     integer,dimension(1) :: atms
@@ -1994,29 +2265,124 @@ end function sym_atm_rmse_qtot
 
 !-------------------------------------------------------------------------------
 ! computes root mean squared error of the current fit to the true esp
-real(rp) function rmse(q)
+real(rp) function rmse(q) 
     implicit none
-    real(rp), dimension(:) :: q                 ! input charges
+    real(rp), intent(inout) :: q(:)                 ! input charges
     real(rp), dimension(size(q,dim=1)) :: q2,q3 ! transformed charges
+    real(rp), dimension(3) :: pt
     integer :: idx,i
     rmse = 0._rp
 
     do idx = 1,Ngrid(1)
-      rmse = rmse + (coulomb_potential(gridval(1,:,idx),q) - esp_grid(1,idx))**2
+      pt = gridval(1,:,idx)
+      rmse = rmse + (coulomb_potential(pt,q) - esp_grid(1,idx))**2
     end do
+    ! if fitting to multiple conformers
     do i = 2,Nconf
+      ! get charge positions in local axis system
       if(i == 2) then
         call assign_charges_to_atoms(q,1)
         call global_to_local(q,q2,1) !transform charge positions to local coords
       end if
+      ! transform from local to each global axis for each conformer
       call local_to_global(q2,q3,i) !transform back to global for new conformer
       do idx = 1,Ngrid(i)
-        rmse = rmse + (coulomb_potential(gridval(i,:,idx),q3) - esp_grid(i,idx))**2
+        pt = gridval(i,:,idx)
+        rmse = rmse + (coulomb_potential(pt,q3) - esp_grid(i,idx))**2
       end do
     end do
 
     rmse = sqrt(rmse/NgridrTot)
 end function rmse
+!-------------------------------------------------------------------------------
+
+!-------------------------------------------------------------------------------
+! computes root mean squared error of the current fit to the true esp
+function drmse(q,n) result (drmsedq)
+    implicit none
+    real(rp), intent(in) :: q(:)                 ! input charges
+    real(rp), dimension(size(q,dim=1)) :: q2,q3 ! transformed charges
+    real(rp), dimension(n-1) :: drmsedq ! to hold derivs wrt chg posn & q
+    ! the final charge magnitude is not fitted, so has no derivatives
+!    real(rp), allocatable, intent(out) :: drmsedq(:) ! to hold derivs wrt chg posn & q
+    real(rp), dimension(size(q,dim=1)) :: tdrmsedq ! to temporarily hold for other conformers
+    real(rp), dimension(size(q,dim=1)) :: ltdrmsedq ! for local axis derivatives
+    real(rp), dimension(size(q,dim=1)) :: gtdrmsedq ! for derivatives in frame of conformer 1
+    real(rp), dimension(4) :: dVdq ! derivative of ESP wrt charge posn and q
+    real(rp), dimension(3) :: pt
+    real(rp) :: fac,delta,rmse
+
+    integer, intent(in) :: n
+    integer :: idx,i,j,k
+
+    rmse = 0._rp
+    drmsedq(1:n-1) = 0._rp
+
+    ! first grid (conformer) only
+    do idx = 1,Ngrid(1)
+      pt = gridval(1,:,idx)
+      delta = coulomb_potential(pt,q) - esp_grid(1,idx)
+      rmse = rmse + delta**2
+      ! for each of the charges, accumulate derivatives of RMSE
+      do i=1,num_charges
+        dVdq = dcoulomb_potential(pt,q,i)
+        drmsedq(4*(i-1)+1) = drmsedq(4*(i-1)+1) + delta * dVdq(1) ! x-component
+        drmsedq(4*(i-1)+2) = drmsedq(4*(i-1)+2) + delta * dVdq(2) ! y-component
+        drmsedq(4*(i-1)+3) = drmsedq(4*(i-1)+3) + delta * dVdq(3) ! z-component
+        if(i < num_charges) then
+          drmsedq(4*i) = drmsedq(4*i) + delta * dVdq(4) ! charge derivative
+        endif
+      end do
+    end do
+
+    ! if fitting to multiple conformers we need to transform the derivatives to 
+    ! local axes and back to global of first grid...
+    do i = 2,Nconf
+      tdrmsedq(1:size(q,dim=1)) = 0._rp
+      ! get charge positions in local axis system
+      if(i == 2) then
+        call assign_charges_to_atoms(q,1)
+        call global_to_local(q,q2,1) !transform charge positions to local coords
+      end if
+      ! transform from local to each global axis for each conformer
+      call local_to_global(q2,q3,i) !transform back to global for new conformer
+      do idx = 1,Ngrid(i)
+        pt=gridval(i,:,idx)
+        delta = coulomb_potential(pt,q3) - esp_grid(i,idx)
+        rmse = rmse + delta**2
+        ! for each of the charges, accumulate derivatives of RMSE
+        do k=1,num_charges
+          dVdq = dcoulomb_potential(pt,q3,k)
+          tdrmsedq(4*(k-1)+1) = tdrmsedq(4*(k-1)+1) + delta * dVdq(1) ! x-component
+          tdrmsedq(4*(k-1)+2) = tdrmsedq(4*(k-1)+2) + delta * dVdq(2) ! y-component
+          tdrmsedq(4*(k-1)+3) = tdrmsedq(4*(k-1)+3) + delta * dVdq(3) ! z-component
+          if(k < num_charges) then
+            tdrmsedq(4*k) = tdrmsedq(4*k) + delta * dVdq(4) ! charge derivative
+          end if
+        end do
+      end do
+      ! we now have the derivatives for grid i in the axis of that grid, 1st
+      ! convert to local axes:
+      call dglobal_to_local(tdrmsedq,ltdrmsedq,i)
+      ! now convert to the global axis of grid 1
+      call dlocal_to_global(ltdrmsedq,gtdrmsedq,1)
+      ! now we can add them onto drmsedq in the global axis of grid 1
+      drmsedq(1:size(q,dim=1)-1) = drmsedq(1:size(q,dim=1)-1) + gtdrmsedq(1:size(q,dim=1)-1)
+    end do
+
+    ! get final RMSE and multiply derviatives by RMSE factor
+    rmse = sqrt(rmse/NgridrTot)
+    fac = 1._rp/(rmse*NgridrTot)
+    do i=1,num_charges
+      ! not sure why we need the minus sign, must have made a mistake in the derivatives...
+      drmsedq(4*(i-1)+1) = -drmsedq(4*(i-1)+1) * fac
+      drmsedq(4*(i-1)+2) = -drmsedq(4*(i-1)+2) * fac
+      drmsedq(4*(i-1)+3) = -drmsedq(4*(i-1)+3) * fac
+      if(i < num_charges) then
+        drmsedq(4*i) = drmsedq(4*i) * fac
+      endif
+    end do
+end function drmse
 !-------------------------------------------------------------------------------
 
 !-------------------------------------------------------------------------------
@@ -2042,7 +2408,7 @@ end function rmse_conf
 ! computes root mean squared error of the current fit to the true esp
 real(rp) function rmse_multipole(m)
     implicit none
-    real(rp), dimension(:) :: m ! input multipoles
+    real(rp), intent(in) :: m(:) ! input multipoles
     integer :: idx
     rmse_multipole = 0._rp
     do idx = 1,Ngrid(1)
@@ -2297,6 +2663,30 @@ end function coulomb_potential
 !-------------------------------------------------------------------------------
 
 !-------------------------------------------------------------------------------
+! computes derivative term from Coulomb potential of charges q at grid position x
+function dcoulomb_potential(x,q,n) result(dVdrq)
+    implicit none
+    real(rp), dimension(3), intent(in) :: x ! position
+    real(rp), dimension(:) :: q ! charges
+    integer :: n ! charge of interest
+    real(rp), dimension(4) :: dVdrq
+    real(rp) :: r,rn,tmpr
+    integer :: i,ii,ix
+
+    ix=(n-1)*4+1
+    r = sqrt(sum((q(ix:ix+2)-x)**2))
+    ii = size(q,dim=1)-3 ! index of final charge (used to fix total charge so unusual dq)
+    rn = sqrt(sum((q(ii:ii+2)-x)**2))
+    if(r < 1.e-9_rp) r = 1.e-9_rp ! prevent division by 0
+    tmpr = q(ix+3) / r**3  ! compute distance factor
+    dVdrq(1) = tmpr*(q(ix)-x(1))
+    dVdrq(2) = tmpr*(q(ix+1)-x(2))
+    dVdrq(3) = tmpr*(q(ix+2)-x(3))
+    dVdrq(4) = (1._rp / r) - (1._rp / rn) ! zero if n is the final charge
+end function dcoulomb_potential
+!-------------------------------------------------------------------------------
+
+!-------------------------------------------------------------------------------
 ! computes Coulomb potential for the given charges q at position x (single
 ! precision)
 real function coulomb_potential_sp(x,q)
@@ -2466,7 +2856,7 @@ subroutine init_search_range()
         search_range(2,i+1) = y_max
         search_range(1,i+2) = z_min
         search_range(2,i+2) = z_max
-        if(i+3 < size(charges,dim=1)) then ! we use constraint charges
+        if(i+3 < size(search_range,dim=2)) then ! we use constraint charges
             search_range(1,i+3) = q_min
             search_range(2,i+3) = q_max
         end if
@@ -2523,6 +2913,50 @@ subroutine init_pop(pop)
     end do     
 end subroutine init_pop
 !-------------------------------------------------------------------------------
+
+!-------------------------------------------------------------------------------
+! initializes mu to a feasible solution for GNES
+subroutine gnes_init_pop(pop)
+    implicit none
+    real(rp), dimension(:), intent(out) :: pop
+    real(rp), dimension(3) :: ranvec
+    real(rp) :: ran
+    integer  :: a, b, d 
+
+    ! loop over population
+    do d = 1,qdim,4
+        ! determine atom number
+        if(d/4 < (num_charges/natmfit)*natmfit) then
+            ! choose atom through equal sampling
+            b = mod(d/4,natmfit) + 1
+            a = fitatoms(b)
+        else
+            ! determine a random atom
+            call random_number(ran)
+            b = ceiling(ran*natmfit)
+            a = fitatoms(b)
+        end if
+        !write(*,'(A,I0,A,I0,A,L)') "pop ", p, " atom# ", a ," random? ", .not.(d/4 < (num_charges/Natom)*Natom)
+
+        ! draw a random vector and normalize (random direction)
+        call random_number(ranvec)
+        ranvec = ranvec - 0.5_rp
+        ranvec = ranvec/sqrt(sum(ranvec**2))
+
+        ! draw a random scaling factor and scale vector
+        call random_number(ran)
+        ranvec = ran*vdW_scaling*vdW_radius(atom_num(a))*ranvec
+
+        ! set charge position, 1st conformer is reference
+        pop(d:d+2) = atom_pos(1,:,a) + ranvec
+
+        ! set charge magnitude
+        if(d+3 < qdim) then ! in case we use constraint charges
+            call random_number(ran)
+            pop(d+3) = -max_charge + 2*ran*max_charge
+        end if
+    end do
+end subroutine gnes_init_pop
 
 
 !-------------------------------------------------------------------------------
@@ -2621,6 +3055,82 @@ subroutine init_pop_greedy(pop)
 end subroutine init_pop_greedy
 !-------------------------------------------------------------------------------
 
+!-------------------------------------------------------------------------------
+! initializes mu to a feasible solution generated using the greedy fit
+subroutine gnes_init_pop_greedy(pop)
+    implicit none
+    real(rp), dimension(:), intent(out) :: pop
+    real(rp), dimension(size(pop,dim=1))  :: prototype
+    real(rp) :: ran, sumP, charge_correction
+    real(rp), dimension(Natom) :: improvementProbability
+    real(rp) :: maxImprovementProbability
+    integer :: maxIndex
+    integer, dimension(Natom)  :: chargesPerAtom
+    integer  :: popSize, a, dimStart, dimEnd
+    integer  :: tNconf
+
+    !decide how to distribute the charges
+    chargesPerAtom = 0 !initialize to 0
+    improvementProbability = 1._rp/real(natmfit,rp) !initialize
+
+    do while(sum(chargesPerAtom) < num_charges .and. &
+             sum(chargesPerAtom) < num_charges_max_multipole*natmfit) !we randomly decide where to put charges
+        maxImprovementProbability = 0._rp
+        maxIndex=1
+        !determine how likely it is that placing a charge will improve the solution
+        do b = 1,natmfit
+            a = fitatoms(b)
+            if(chargesPerAtom(a) < num_charges_max_multipole) then
+                !compare RMSE with a chgs to RMSE with a+1 for atomic solution
+                improvementProbability(a) = multipole_solutions_rmse(chargesPerAtom(a),a) &
+                                          - multipole_solutions_rmse(chargesPerAtom(a)+1,a)
+                if(improvementProbability(a) < 0._rp) improvementProbability(a) = 0._rp
+            else
+                improvementProbability(a) = 0._rp
+            end if
+            if (improvementProbability(a) > maxImprovementProbability) then
+                maxImprovementProbability = improvementProbability(a)
+                maxIndex = a
+            end if
+        end do
+        ! add charge to atom with highest improvement probability:
+        chargesPerAtom(maxIndex) = chargesPerAtom(maxIndex) + 1
+    end do
+
+    !in case we have 0 charges on at least 1 atom, the total charge will be messed up.
+    !So, all charges need to be scaled accordingly. Here we determine by what they are scaled.
+    charge_correction = 0._rp
+    do b = 1,natmfit
+        a = fitatoms(b)
+        if(chargesPerAtom(a) == 0) then
+            charge_correction = charge_correction + multipole(1,a)
+        end if
+    end do
+    charge_correction = charge_correction/real(num_charges,rp)
+
+    !write(*,*) "charges per atom:", chargesPerAtom(:)
+    !write(*,*) "probabilites:", improvementProbability
+    !write(*,*)
+
+    !build the prototype vector
+    dimStart = 1
+    do b = 1,natmfit
+        a = fitatoms(b)
+        if(chargesPerAtom(a) == 0) cycle
+        !determine exactly what to load
+        dimEnd = chargesPerAtom(a)*4-1
+        if(dimStart+dimEnd > qdim) dimEnd = dimEnd-1
+        prototype(dimStart:dimStart+dimEnd) = multipole_solutions(1:1+dimEnd,chargesPerAtom(a),a)
+        dimStart = dimStart+dimEnd+1
+        if(dimStart > qdim) exit
+        !correct charge, if necessary
+        prototype(dimStart-1) = prototype(dimStart-1) + charge_correction
+    end do
+
+    !set vector
+    pop(:) = prototype(:)
+
+end subroutine gnes_init_pop_greedy
 
 !-------------------------------------------------------------------------------
 ! initializes the population to only feasible solutions
@@ -2658,6 +3168,36 @@ subroutine init_pop_multipole(pop)
 end subroutine init_pop_multipole
 !-------------------------------------------------------------------------------
 
+!-------------------------------------------------------------------------------
+! initializes mu to only feasible solutions
+subroutine gnes_init_pop_multipole(pop)
+    implicit none
+    real(rp), dimension(:), intent(out) :: pop
+    real(rp), dimension(3) :: ranvec
+    real(rp) :: ran
+    integer  :: popSize, d
+
+    do d = 1,qdim,4
+        ! draw a random vector and normalize (random direction)
+        call random_number(ranvec)
+        ranvec = ranvec - 0.5_rp
+        ranvec = ranvec/sqrt(sum(ranvec**2))
+
+        ! draw a random scaling factor and scale vector
+        call random_number(ran)
+        ranvec = ran*vdW_scaling*vdW_radius(atom_num(a))*ranvec
+
+        ! set charge position
+        pop(d:d+2) = atom_pos(1,:,a) + ranvec
+
+        ! set charge magnitude
+        if(d+3 < qdim) then ! in case we use constraint charges
+            call random_number(ran)
+            pop(d+3) = -abs(multipole(1,a)) + 2*ran*abs(multipole(1,a))
+        end if
+    end do
+end subroutine gnes_init_pop_multipole
+!-------------------------------------------------------------------------------
 
 !-------------------------------------------------------------------------------
 ! initializes the population to only feasible symmetry solutions
@@ -3549,11 +4089,13 @@ subroutine calc_multipole_grid_and_slice_data(mp,a,conf)
     implicit none
     integer :: conf,a !input atom and conformer
     real(rp), dimension(:,:) :: mp !input multipole
+    real(rp), dimension(3) :: pt
     integer :: i,j
     
     !calculate the esp grid generated from just this multipole
     do i = 1,Ngrid(1)
-        esp_grid(1,i) = coulomb_potential_single_multipole(gridval(1,:,i),mp,a,conf) 
+        pt = gridval(1,:,i)
+        esp_grid(1,i) = coulomb_potential_single_multipole(pt,mp,a,conf) 
     end do
     
     !calculate the slice data from just this multipole
