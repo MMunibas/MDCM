@@ -285,7 +285,7 @@
 !     PARAMETERS FOR LINE SEARCH ROUTINE
 !     
       FTOL= 1.0D-4 
-      MAXFEV= 20
+      MAXFEV= 60 ! orig=20   MD
 !!      FTOL= 1.0D-3 ! MD: test parameters
 !!      MAXFEV= 60   ! MD: test parameters
 !
