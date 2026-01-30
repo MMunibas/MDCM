@@ -208,6 +208,7 @@ Nconf = 0
 Nmtp = 0
 NgridrTot = 0
 dcut=0.d0
+input_multipolefile=''
 
 call system("mkdir -p slices")
 
