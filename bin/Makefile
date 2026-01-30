@@ -20,7 +20,7 @@ NVFLAGS = -D GPU -g -O0 #-Mbounds -Mchkptr -Mchkstk # nvfortran
 # FOR CPU
 F90 = gfortran
 FFLAGS_PAR = -fopenmp -cpp -fcheck=bounds,mem -g #-pg
-LFLAGS_PAR = -fopenmp -g -lopenblas #-pg
+LFLAGS_PAR = -fopenmp -g -lopenblas -z noexecstack #-pg
 #FFLAGS_PAR = -fopenmp -cpp -fcheck=all -fstack-protector -fsanitize=undefined -g #-pg
 #LFLAGS_PAR = -fopenmp -fsanitize=undefined -fsanitize=address -g -lopenblas #-pg
 #FFLAGS     = -O3 -g 
