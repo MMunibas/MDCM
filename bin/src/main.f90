@@ -3344,6 +3344,8 @@ character(len=1024) :: dummy1,dummy2
 
 open(30, file=trim(inpfile), status="old", action="read", iostat = ios)
 if(ios /= 0) call throw_error('Could not open "'//trim(inpfile)//'" for reading')
+read(30,*,iostat=ios) !skip Max MEP
+read(30,*,iostat=ios) !skip Mean abs MEP
 read(30,*,iostat=ios) !skip total charge
 read(30,*,iostat=ios) !skip comment
 read(30,*) lcur !read l
