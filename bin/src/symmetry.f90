@@ -7,6 +7,8 @@
 !///////////////////////////////////////////////////////////////////////////////
 module symmetry
 
+use, intrinsic :: iso_fortran_env, only: real64
+
 private
 public :: symmetry_init, equal, isSymmetryOperation, asymmetryMagnitude, centerOfMass
 public :: symmetryOperation, getShiftedPos, getChargeOps, chgsSpawned
@@ -16,7 +18,7 @@ public :: getNumSymOps, sym_init_pars, read_sym_file, write_sym_file, sym_map_se
 public :: init_atm_sym_search, sym_init_fit_ops
           !calc_eigenvalues, calc_eigenvectors, rotation !only for test reasons public
           
-integer, parameter :: rp = kind(0d0)
+integer, parameter :: rp = real64
 !type definition of symmetry operations
 type symmetryOperation
     character(len=4)        :: label !identifies the symmetryOperation, e.g. Cn, sig, i, etc.
@@ -921,7 +923,7 @@ subroutine find_symmetry_elements_of_sea_set(set,arrangement)
         !so we try all atoms
         do i = 1,k
             !catch divide by zero
-            if(sum((pos(i,:)-com)**2) == 0.d0) then
+            if(sum((pos(i,:)-com)**2) == 0_rp) then
               axis(:)=0.d0
             else
               axis = (pos(i,:)-com)/sqrt(sum((pos(i,:)-com)**2))
@@ -1636,7 +1638,7 @@ function refplane_to_cartesian(atom,op,rx,ry)
 
     ! define x-axis as arbitrary vector in mirror plane
     do i=1,3
-      if(allSymOps(op)%axis(i).ne.0.d0)then
+      if(allSymOps(op)%axis(i).ne.0_rp)then
         do j=1,3
           if(j.ne.i)then
             xax(j)=allSymOps(op)%axis(i)

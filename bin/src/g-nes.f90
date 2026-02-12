@@ -240,6 +240,14 @@ contains
           real*8 :: y(n)
         end function dfunc
     end interface
+    interface
+      subroutine lbfgs(n,m,x,f,g,diagco,diag,iprint,eps,xtol,w,iflag)
+        integer :: n,m,iprint(2),iflag
+        double precision :: x(n), g(n), diag(n), w(n*(2*m+1)+2*m)
+        double precision :: f, eps, xtol
+        logical :: diagco
+      end subroutine lbfgs
+    end interface
 
     m = 5
     allocate(g(n), diag(n), w(3*n*m + 2*n))

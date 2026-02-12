@@ -3290,7 +3290,7 @@ implicit none
 integer  :: N,i,nchg_tot,lnchg_tot,nChgFit,atm
 integer, dimension(:) :: num_seas
 integer,dimension(num_symFitAtms) :: combo
-real(8)  :: rmse_tot,lrmse_tot
+real(rp)  :: rmse_tot,lrmse_tot
 
 ! for each atom in symFitAtms
 atm=symFitAtms(N)

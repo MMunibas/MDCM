@@ -25,8 +25,11 @@ module xorshift1024ast
 ! Vigna's xorshift1024* pseudorandom generator.
 ! (Sebastiano Vigna. An experimental exploration of Marsaglia's xorshift generators, scrambled. CoRR, abs/1402.6246, 2014.)
 ! xorshift1024* is a pseudorandom generator with a reasonable speed and a good state space size. This is a standard choice of the generator.
+  use, intrinsic :: iso_fortran_env, only: real64
 
   implicit none
+
+  integer, parameter :: rp = real64
   
   ! random number state
   public :: xorshift1024ast_state
@@ -193,13 +196,13 @@ contains
     rand_integer = draw_integer(global_state, rmax)
   end function rand_integer
 
-  real(8) function draw_uniform(state)
+  real(rp) function draw_uniform(state)
     implicit none
     type(xorshift1024ast_state), intent(inout) :: state
     integer(8) :: rnd 
 
     ! 1.0 / (1 << 53)
-    real(8), parameter :: multiplier = 1.0d0 / 9007199254740992d0
+    real(rp), parameter :: multiplier = 1.0d0 / 9007199254740992d0
 
     rnd = draw_integer8(state)
     
@@ -207,7 +210,7 @@ contains
     draw_uniform = real(ishft(rnd, -11), kind=8) * multiplier
   end function draw_uniform
 
-  real(8) function rand_uniform()
+  real(rp) function rand_uniform()
     implicit none
     rand_uniform = draw_uniform(global_state)
   end function rand_uniform
@@ -226,12 +229,10 @@ end module xorshift1024ast
 module differential_evolution
 !$ use omp_lib
 use xorshift1024ast
+use, intrinsic :: iso_fortran_env, only: real64
 implicit none
 private
 public :: DE_init, DE_exit, DE_optimize, DE_simplex, rp, DErand1, DErand2, DEbest1, DEbest2, DEtargettobest1, DErand2dir
-
-! real precision
-integer, parameter :: rp = kind(0d0) 
 
 enum, bind(c) ! Mutation strategy
     enumerator :: DErand1, DErand2, DEbest1, DEbest2, DEtargettobest1, DErand2dir
@@ -408,28 +409,38 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop,dcut)
     implicit none
     real(rp), dimension(:) :: x
     real(rp), dimension(size(x, dim=1)), intent(in), optional :: guess
-    interface
-        real*8 function func(y)
+    abstract interface
+        function func_iface(y) result(res)
+            use, intrinsic :: iso_fortran_env, only: real64
             !real*8, dimension(:), intent(in) :: y
-            real*8, intent(in) :: y(:)
-        end function func
+            real(real64), intent(in) :: y(:)
+            real(real64) :: res
+        end function func_iface
     end interface 
-    interface
-        logical function feasible(y)
-            real*8, dimension(:) :: y
-        end function feasible
+    abstract interface
+        function feasible_iface(y) result(ok)
+            use, intrinsic :: iso_fortran_env, only: real64
+            real(real64), dimension(:) :: y
+            logical :: ok
+        end function feasible_iface
     end interface
-    interface
-        real*8 function sumconstr(y)
-            real*8, dimension(:) :: y
-        end function sumconstr
+    abstract interface
+        function sumconstr_iface(y) result(res)
+            use, intrinsic :: iso_fortran_env, only: real64
+            real(real64), dimension(:) :: y
+            real(real64) :: res
+        end function sumconstr_iface
     end interface  
-    interface
-        subroutine init_pop(pop)
-            real*8, dimension(:,:), intent(out) :: pop 
-        end subroutine init_pop
+    abstract interface
+        subroutine init_pop_iface(pop)
+            use, intrinsic :: iso_fortran_env, only: real64
+            real(real64), intent(out) :: pop(:,:)
+        end subroutine init_pop_iface
     end interface 
-    optional :: init_pop
+    procedure(func_iface)                :: func
+    procedure(feasible_iface)            :: feasible
+    procedure(sumconstr_iface)           :: sumconstr
+    procedure(init_pop_iface), optional  :: init_pop
     
 !    real(rp), dimension(dime,4) :: m  !randomly selected individuals
     real(rp), dimension(:,:), allocatable :: m  !randomly selected individuals
@@ -684,7 +695,7 @@ subroutine DE_optimize(func,feasible,sumconstr,x,guess,init_pop,dcut)
         ! optionally check for convergence based purely on cost function improvement over
         ! last 1000 generations (1000 is a hardcoded, arbitrary parameter)
         if(gen.eq.1) fpop_old=fpop(bestindx)
-        if(dcut.ne.0.d0.and.modulo(gen,1000) == 0) then
+        if(dcut.ne.0_rp.and.modulo(gen,1000) == 0) then
           if(abs(fpop_old-fpop(bestindx)).gt.abs(dcut))then
             fpop_old=fpop(bestindx)
           else
@@ -708,18 +719,23 @@ end subroutine DE_optimize
 subroutine compare_solutions(func,feasible,sumconstr,x1,f1,fsble1,constr1,x2,func_x2,feasible_x2,sumconstr_x2)
     implicit none
     interface
-        real*8 function func(y)
-            real*8, intent(in) :: y(:)
+        function func(y) result(res)
+            use, intrinsic :: iso_fortran_env, only: real64
+            real(real64), intent(in) :: y(:)
+            real(real64) :: res
         end function func
     end interface 
     interface
         logical function feasible(y)
-            real*8, dimension(:) :: y
+            use, intrinsic :: iso_fortran_env, only: real64
+            real(real64), dimension(:) :: y
         end function feasible
     end interface 
     interface
-        real*8 function sumconstr(y)
-            real*8, dimension(:) :: y
+        function sumconstr(y) result(res)
+            use, intrinsic :: iso_fortran_env, only: real64
+            real(real64), dimension(:) :: y
+            real(real64) :: res
         end function sumconstr
     end interface 
     real(rp), dimension(:), intent(out) :: x1 !x1 is the "old" solution

@@ -19,8 +19,13 @@ NVFLAGS = -D GPU -g -O0 #-Mbounds -Mchkptr -Mchkstk # nvfortran
 
 # FOR CPU
 F90 = gfortran
-FFLAGS_PAR = -fopenmp -cpp -fcheck=bounds,mem -g #-pg
-LFLAGS_PAR = -fopenmp -g -lopenblas -z noexecstack #-pg
+FFLAGS_PAR = -fopenmp -cpp -fcheck=all -fbacktrace -finit-integer=-999999 -g #-pg
+#FFLAGS_PAR = -O0 -fopenmp -cpp -fcheck=all -fbacktrace -ffpe-trap=invalid,zero,overflow -fno-omit-frame-pointer -finit-real=snan -finit-integer=-999999 -g #-pg
+#FFLAGS_PAR_STRICT = $(FFLAGS_PAR) -Wall -Wextra -Wimplicit-interface -Werror=implicit-interface -Wno-unused-variable -Wno-unused-dummy-argument
+#FFLAGS_PAR_LEGACY = $(FFLAGS_PAR) -Wno-implicit-interface \
+                    -Wno-unused-variable -Wno-unused-dummy-argument
+LFLAGS_PAR = -fopenmp -g -lopenblas #-pg
+#LFLAGS_PAR = -fopenmp -g -Wl,-z,noexecstack -lopenblas #-pg
 #FFLAGS_PAR = -fopenmp -cpp -fcheck=all -fstack-protector -fsanitize=undefined -g #-pg
 #LFLAGS_PAR = -fopenmp -fsanitize=undefined -fsanitize=address -g -lopenblas #-pg
 #FFLAGS     = -O3 -g 
@@ -64,13 +69,13 @@ all : cubefit.x pcubefit.x cudacubefit.x clean
 
 # rules
 cubefit.x : $(OBJS) 
-	${F90}  -o $@ $(LFLAGS) $(OBJS) 
+	${F90}  -o $@ $(OBJS) $(LFLAGS)
 	 
 pcubefit.x : $(OBJS_PAR) 
-	${F90}  -o $@ $(LFLAGS_PAR) $(OBJS_PAR) 
+	${F90}  -o $@ $(OBJS_PAR) $(LFLAGS_PAR) 
 
 cudacubefit.x : $(CUDA_OBJS)
-	${F90_CUDA}  -o $@ $(LFLAGS_CUDA) $(CUDA_OBJS)
+	${F90_CUDA}  -o $@ $(CUDA_OBJS) $(LFLAGS_CUDA) 
 
 #######################################
 # Object dependencies and compilation #
@@ -90,7 +95,7 @@ psymmetry.o : src/symmetry.f90
 pmain.o : src/main.f90 \
 pdifferential_evolution.o \
 pg-nes.o \
-lbfgs.o \
+plbfgs.o \
 psymmetry.o 
 	$(F90) -c $(FFLAGS_PAR) $(INCLUDES) -o $@ src/main.f90
 
